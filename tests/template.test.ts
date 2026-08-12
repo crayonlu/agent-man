@@ -17,7 +17,7 @@ test("the bundled repository template is deny-by-default and line-ending explici
   for (const profile of NATIVE_PROFILES) {
     assert.equal(ignores.includes(`!/${profile.repositoryDirectory}/`), true);
   }
-  assert.match(attributes, /^\* text=auto$/mu);
+  assert.match(attributes, /^\* text=auto eol=lf$/mu);
   assert.match(attributes, /^\*\.sh text eol=lf$/mu);
   assert.match(attributes, /^\*\.cmd text eol=crlf$/mu);
 });

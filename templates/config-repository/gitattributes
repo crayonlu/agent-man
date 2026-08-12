@@ -1,5 +1,5 @@
 # Keep text mergeable while preventing platform defaults from changing hook/script semantics.
-* text=auto
+* text=auto eol=lf
 *.toml text eol=lf
 *.json text eol=lf
 *.md text eol=lf
