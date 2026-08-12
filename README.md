@@ -29,12 +29,7 @@ npm run build
 npm link
 ```
 
-Or install directly from GitHub:
-
-```bash
-npm install --global git+https://github.com/crayonlu/agent-man.git
-agent-man --version
-```
+The early MVP is installed from a source checkout; it is not published to the npm registry yet.
 
 ## Give it to an agent
 

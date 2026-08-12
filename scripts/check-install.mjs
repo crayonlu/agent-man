@@ -26,26 +26,44 @@ if (npmCli === undefined) {
   mkdirSync(artifacts, { recursive: true });
   mkdirSync(home, { recursive: true });
 
-  function run(arguments_, options = {}) {
-    const result = spawnSync(process.execPath, [npmCli, ...arguments_], {
+  function run(command, arguments_, options = {}) {
+    const result = spawnSync(command, arguments_, {
       cwd: options.cwd ?? process.cwd(),
       encoding: "utf8",
       env: environment,
     });
     if (result.status !== 0) {
       const detail = result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}`;
-      throw new Error(`npm ${arguments_.join(" ")} failed: ${detail}`);
+      throw new Error(`${command} ${arguments_.join(" ")} failed: ${detail}`);
     }
     return result.stdout;
   }
 
+  function runNpm(arguments_, options = {}) {
+    return run(process.execPath, [npmCli, ...arguments_], options);
+  }
+
   try {
-    run(["pack", "--pack-destination", artifacts]);
-    const tarballName = readdirSync(artifacts).find((name) => name.endsWith(".tgz"));
-    if (tarballName === undefined) {
-      throw new Error("npm pack did not produce a tarball.");
+    if (process.argv.includes("--github")) {
+      const packageDirectory = join(root, "source");
+      run("git", [
+        "clone",
+        "--depth",
+        "1",
+        "https://github.com/crayonlu/agent-man.git",
+        packageDirectory,
+      ]);
+      runNpm(["install"], { cwd: packageDirectory });
+      runNpm(["run", "build"], { cwd: packageDirectory });
+      runNpm(["link"], { cwd: packageDirectory });
+    } else {
+      runNpm(["pack", "--pack-destination", artifacts]);
+      const tarballName = readdirSync(artifacts).find((name) => name.endsWith(".tgz"));
+      if (tarballName === undefined) {
+        throw new Error("npm pack did not produce a tarball.");
+      }
+      runNpm(["install", "--global", join(artifacts, tarballName)]);
     }
-    run(["install", "--global", join(artifacts, tarballName)]);
 
     const executable =
       process.platform === "win32"
@@ -68,7 +86,10 @@ if (npmCli === undefined) {
       throw new Error("The installed package does not contain the agent-man skill.");
     }
 
-    console.log("Installed tarball CLI and bundled Agent Skill verified in an isolated prefix.");
+    const sourceLabel = process.argv.includes("--github") ? "GitHub checkout" : "local tarball";
+    console.log(
+      `Installed ${sourceLabel} CLI and bundled Agent Skill verified in an isolated prefix.`,
+    );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

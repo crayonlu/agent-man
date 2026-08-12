@@ -17,6 +17,7 @@
     "format": "prettier --write . && tsc -p tsconfig.json --noEmit",
     "format:check": "prettier --check . && tsc -p tsconfig.json --noEmit",
     "install:check": "node scripts/check-install.mjs",
+    "install:check:github": "node scripts/check-install.mjs --github",
     "pack:check": "npm pack --dry-run",
     "prepare": "npm run build",
     "smoke": "npm run build && node dist/src/cli.js --help",

@@ -27,13 +27,20 @@ normalized schema or translate between harnesses.
 
 ## Install
 
-Check for Node.js 22+, Git, GitHub CLI, and `agent-man` first. If `agent-man` is absent, ask before
-installing software, then use:
+Check for Node.js 22+, Git, GitHub CLI, and `agent-man` first. If `agent-man` is absent, ask where to
+keep its source checkout and ask before installing software. Clone it, then use:
 
 ```bash
-npm install --global git+https://github.com/crayonlu/agent-man.git
+git clone https://github.com/crayonlu/agent-man.git
+cd agent-man
+npm install
+npm run build
+npm link
 agent-man --version
 ```
+
+Do not use `npm install --global git+https://github.com/crayonlu/agent-man.git`; the MVP is not a
+prebuilt registry package. Reuse an existing clean checkout instead of cloning over it.
 
 For the default GitHub flow, verify `gh auth status`. Ask the user to complete `gh auth login` when
 needed; never request or print their token.
