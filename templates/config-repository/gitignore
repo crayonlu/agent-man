@@ -1,0 +1,13 @@
+# Operating-system noise
+.DS_Store
+Thumbs.db
+
+# Grok Build: credentials and machine-local runtime state
+.grok/auth.json
+.grok/mcp_credentials.json
+.grok/bin/
+.grok/cache/
+.grok/crash/
+.grok/logs/
+.grok/sessions/
+.grok/tmp/
