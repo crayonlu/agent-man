@@ -29,6 +29,35 @@ npm run build
 npm link
 ```
 
+Or install directly from GitHub:
+
+```bash
+npm install --global git+https://github.com/crayonlu/agent-man.git
+agent-man --version
+```
+
+## Give it to an agent
+
+The repository includes an [open Agent Skill](https://agentskills.io/) at
+`.agents/skills/agent-man`. Codex discovers it automatically while working in this repository. To
+install it for all repositories, ask Codex:
+
+> Use `$skill-installer` to install the `agent-man` skill from
+> `https://github.com/crayonlu/agent-man/tree/main/.agents/skills/agent-man`.
+
+Then ask the agent to perform the setup:
+
+> Use `$agent-man` to install agent-man and synchronize my Grok Build configuration with the
+> private GitHub repository `agent-man-config`. Before changing anything, show me the live config
+> directory, the excluded paths, and the commands you intend to run. Do not read or sync credentials,
+> sessions, logs, cache, or history.
+
+The skill tells compatible agents to verify prerequisites and GitHub authentication, preview status,
+request approval before installation or repository creation, and stop safely on Git conflicts. It
+does not give the agent permission to expose secrets or silently widen `.gitignore`. Agent-man
+blocks known credential files, but cannot identify a secret embedded inside an otherwise managed
+configuration file; use environment-variable references for those values.
+
 ## First device
 
 ```bash
@@ -143,4 +172,7 @@ npm run format
 npm run test
 ```
 
-Tests use temporary local Git repositories; they do not contact GitHub.
+Tests use temporary `HOME`, `GROK_HOME`, and `AGENT_MAN_HOME` directories plus temporary local Git
+remotes. The end-to-end test launches the compiled CLI as separate processes and verifies a
+two-device sync, credential exclusion, and backup creation. Tests do not contact GitHub or touch the
+developer's real harness directories.

@@ -194,11 +194,19 @@ export function showStatus(context: CommandContext): void {
 
   if (profiles.length === 0) {
     context.output.info("No harness is managed. Run 'agent-man add grok'.");
+    for (const profile of HARNESS_PROFILES) {
+      context.output.info(
+        `${profile.name} (${liveDirectoryFor(profile, context.paths, environment)}): unmanaged`,
+      );
+    }
   }
 
   for (const profile of profiles) {
     const changes = profileChanges(context.paths, profile, environment, runner);
-    context.output.info(`${profile.name}: ${changes.length === 0 ? "clean" : ""}`.trimEnd());
+    const liveDirectory = liveDirectoryFor(profile, context.paths, environment);
+    context.output.info(
+      `${profile.name} (${liveDirectory}): ${changes.length === 0 ? "clean" : "changes"}`,
+    );
     for (const change of changes) {
       context.output.info(`  ${changeMarker(change.kind)} ${change.relativePath}`);
     }

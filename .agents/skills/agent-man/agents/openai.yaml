@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Man"
+  short_description: "Safely sync native harness configuration"
+  default_prompt: "Use $agent-man to set up or synchronize my Grok configuration safely."

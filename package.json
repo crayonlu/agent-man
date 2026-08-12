@@ -7,6 +7,7 @@
     "agent-man": "./dist/src/cli.js"
   },
   "files": [
+    ".agents/skills/agent-man",
     "dist/src",
     "templates"
   ],
@@ -15,6 +16,7 @@
     "test": "npm run build && node scripts/run-tests.mjs",
     "format": "prettier --write . && tsc -p tsconfig.json --noEmit",
     "format:check": "prettier --check . && tsc -p tsconfig.json --noEmit",
+    "install:check": "node scripts/check-install.mjs",
     "pack:check": "npm pack --dry-run",
     "prepare": "npm run build",
     "smoke": "npm run build && node dist/src/cli.js --help",
