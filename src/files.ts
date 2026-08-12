@@ -85,6 +85,13 @@ function normalizedFileSystemRelativePath(path: string): string {
   return path.split(sep).join("/");
 }
 
+export function readNativeSymlinkTarget(path: string): string {
+  const target = readlinkSync(path);
+  return process.platform === "win32" && !isAbsolute(target)
+    ? target.replaceAll("\\", "/")
+    : target;
+}
+
 export function validatePortableRelativePath(relativePath: string): void {
   if (relativePath === "" || isAbsolute(relativePath) || relativePath.startsWith("/")) {
     throw new AppError(
@@ -289,7 +296,7 @@ function resolveInternalTarget(
       }
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) {
-        const linkTarget = readlinkSync(current);
+        const linkTarget = readNativeSymlinkTarget(current);
         const currentRelativePath = normalizedFileSystemRelativePath(relative(root, current));
         if (
           portableSymlinkTargetReason(root, profile, currentRelativePath, linkTarget) !== undefined
@@ -442,7 +449,7 @@ export function walkPortableTree(root: string, profile: NativeProfile): TreeScan
         physicalRoot,
         profile,
         relativePath,
-        readlinkSync(absolutePath),
+        readNativeSymlinkTarget(absolutePath),
       );
       if ("binding" in classified) {
         bindings.push(classified.binding);
@@ -650,7 +657,7 @@ export function managedEntryEquals(
   }
   const actualStat = lstatSync(actual);
   if (entry.kind === "symlink") {
-    return actualStat.isSymbolicLink() && readlinkSync(actual) === entry.linkTarget;
+    return actualStat.isSymbolicLink() && readNativeSymlinkTarget(actual) === entry.linkTarget;
   }
   if (!actualStat.isFile() || actualStat.isSymbolicLink() || actualStat.size !== entry.size) {
     return false;

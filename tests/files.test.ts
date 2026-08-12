@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -17,6 +16,7 @@ import test from "node:test";
 import {
   MAX_MANAGED_FILE_BYTES,
   copyManagedEntry,
+  readNativeSymlinkTarget,
   validatePortablePathSet,
   walkPortableTree,
 } from "../src/files.js";
@@ -78,7 +78,7 @@ test("an internal relative directory link is preserved verbatim", (t) => {
     }
     assert.equal(link.kind, "symlink");
     copyManagedEntry(scan.root, target, link);
-    assert.equal(readlinkSync(join(target, "skills", "current")), "shared");
+    assert.equal(readNativeSymlinkTarget(join(target, "skills", "current")), "shared");
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

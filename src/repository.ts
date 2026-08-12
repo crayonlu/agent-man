@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import {
@@ -22,6 +22,7 @@ import {
   managedPathExists,
   pathInside,
   portableSymlinkTargetReason,
+  readNativeSymlinkTarget,
   readManagedFile,
   removeManagedPath,
   resolveManagedRoot,
@@ -388,7 +389,7 @@ function validateTrackedEntry(
     );
   }
   const worktreeStat = lstatSync(worktreePath);
-  if (worktreeStat.isSymbolicLink() && readlinkSync(worktreePath) !== linkTarget) {
+  if (worktreeStat.isSymbolicLink() && readNativeSymlinkTarget(worktreePath) !== linkTarget) {
     throw new AppError(
       `Tracked symbolic link '${tracked.path}' differs from the Git index.`,
       "GIT_WORKTREE_TYPE_MISMATCH",

@@ -90,7 +90,9 @@ contents. agent-man adopts that exact model.
 | Unsafe link committed to stored Git state                      | Reject               | Never apply              | A remote must not define local escape paths  |
 
 Directory walking uses `lstat` semantics and never descends through a nested link. Target-chain
-validation reads link text/metadata only. Before every copy, removal, or comparison, each existing
+validation reads link text/metadata only. Windows-native relative separators are canonicalized to
+Git's portable `/` representation; Git blob backslashes remain invalid. Before every copy, removal,
+or comparison, each existing
 ancestor below the resolved surface root is checked again for symlinks. Leaf replacement is atomic
 where the operating system permits it.
 

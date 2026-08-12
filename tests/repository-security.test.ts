@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -17,6 +16,7 @@ import { initialize, Output } from "../src/commands.js";
 import { resolveAppPaths } from "../src/paths.js";
 import { findNativeProfile, profileIgnoreContents } from "../src/profiles.js";
 import { hardenRepository } from "../src/git.js";
+import { readNativeSymlinkTarget } from "../src/files.js";
 import { runCommand } from "../src/process.js";
 import {
   applyProfiles,
@@ -187,9 +187,12 @@ test("Git index mode preserves an internal symlink even when checkout materializ
     validateRepositoryScope(repository);
     const result = applyProfiles(paths, [findNativeProfile("grok")], [], environment);
     assert.equal(result.profiles[0]?.copied, 4);
-    assert.equal(readlinkSync(join(home, ".grok", "skills", "alias")), "target");
-    assert.equal(readlinkSync(join(home, ".grok", "skills", "current")), "alias");
-    assert.equal(readlinkSync(join(home, ".grok", "skills", "current-file")), "alias/SKILL.md");
+    assert.equal(readNativeSymlinkTarget(join(home, ".grok", "skills", "alias")), "target");
+    assert.equal(readNativeSymlinkTarget(join(home, ".grok", "skills", "current")), "alias");
+    assert.equal(
+      readNativeSymlinkTarget(join(home, ".grok", "skills", "current-file")),
+      "alias/SKILL.md",
+    );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

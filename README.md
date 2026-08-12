@@ -175,7 +175,8 @@ Links are configuration structure, not aliases to content that agent-man should 
 - The selected surface root itself may be a symlink; it is explicitly resolved once as the trust
   root. Set `GROK_HOME` when a different Grok root is intentional.
 - A nested relative link is portable only when its lexical target and complete link chain stay
-  inside the same allowlisted surface and the target exists. Its original link text is stored.
+  inside the same allowlisted surface and the target exists. Its portable link text is stored;
+  Windows-native relative separators are canonicalized to `/`.
 - An absolute, external, broken, or out-of-profile link is a local binding. It and its subtree are
   reported, protected from remote replacement/deletion, and never uploaded or traversed.
 - A configuration repository may contain only portable internal links. Git mode `120000`, not the
