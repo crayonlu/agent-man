@@ -66,9 +66,14 @@ if (npmCli === undefined) {
     const version = spawnSync(executable, ["--version"], {
       encoding: "utf8",
       env: environment,
+      shell: process.platform === "win32",
     });
     if (version.status !== 0 || version.stdout.trim() !== "agent-man 0.2.0") {
-      throw new Error(version.stderr?.trim() || "Installed CLI did not report its version.");
+      throw new Error(
+        version.error?.message ||
+          version.stderr?.trim() ||
+          "Installed CLI did not report its version.",
+      );
     }
 
     const packageRoot =
@@ -83,10 +88,18 @@ if (npmCli === undefined) {
     const installedSkill = spawnSync(
       executable,
       ["skill", "install", "--target", "all", "--json"],
-      { encoding: "utf8", env: environment },
+      {
+        encoding: "utf8",
+        env: environment,
+        shell: process.platform === "win32",
+      },
     );
     if (installedSkill.status !== 0) {
-      throw new Error(installedSkill.stderr?.trim() || "Bundled skill installation failed.");
+      throw new Error(
+        installedSkill.error?.message ||
+          installedSkill.stderr?.trim() ||
+          "Bundled skill installation failed.",
+      );
     }
     const commonSkill = join(home, ".agents", "skills", "agent-man", "SKILL.md");
     const claudeSkill = join(home, ".claude", "skills", "agent-man", "SKILL.md");
