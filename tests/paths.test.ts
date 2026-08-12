@@ -21,31 +21,39 @@ test("a relative harness override is resolved to an explicit absolute root", () 
 });
 
 test("native profile roots follow each harness's documented home layout", () => {
-  const paths = resolveAppPaths({ HOME: "/tmp/agent-man-home" });
+  const home = resolve("/tmp/agent-man-home");
+  const environment = { HOME: home };
+  const paths = resolveAppPaths(environment);
   assert.equal(
-    liveDirectoryFor(findNativeProfile("claude-code"), paths),
-    "/tmp/agent-man-home/.claude",
+    liveDirectoryFor(findNativeProfile("claude-code"), paths, environment),
+    join(home, ".claude"),
   );
-  assert.equal(liveDirectoryFor(findNativeProfile("codex"), paths), "/tmp/agent-man-home/.codex");
-  assert.equal(liveDirectoryFor(findNativeProfile("pi"), paths), "/tmp/agent-man-home/.pi/agent");
   assert.equal(
-    liveDirectoryFor(findNativeProfile("opencode"), paths),
-    "/tmp/agent-man-home/.config/opencode",
+    liveDirectoryFor(findNativeProfile("codex"), paths, environment),
+    join(home, ".codex"),
   );
-  assert.equal(liveDirectoryFor(findNativeProfile("pi"), paths), "/tmp/agent-man-home/.pi/agent");
   assert.equal(
-    liveDirectoryFor(findNativeProfile("gemini-cli"), paths),
-    "/tmp/agent-man-home/.gemini",
+    liveDirectoryFor(findNativeProfile("pi"), paths, environment),
+    join(home, ".pi", "agent"),
+  );
+  assert.equal(
+    liveDirectoryFor(findNativeProfile("opencode"), paths, environment),
+    join(home, ".config", "opencode"),
+  );
+  assert.equal(
+    liveDirectoryFor(findNativeProfile("gemini-cli"), paths, environment),
+    join(home, ".gemini"),
   );
 });
 
 test("XDG and harness-specific root overrides stay isolated", () => {
-  const paths = resolveAppPaths({ HOME: "/tmp/agent-man-home" });
+  const paths = resolveAppPaths({ HOME: resolve("/tmp/agent-man-home") });
+  const xdgConfig = resolve("/tmp/xdg-config");
   assert.equal(
     liveDirectoryFor(findNativeProfile("opencode"), paths, {
-      XDG_CONFIG_HOME: "/tmp/xdg-config",
+      XDG_CONFIG_HOME: xdgConfig,
     }),
-    "/tmp/xdg-config/opencode",
+    join(xdgConfig, "opencode"),
   );
   assert.equal(
     liveDirectoryFor(findNativeProfile("claude-code"), paths, {
@@ -59,14 +67,15 @@ test("XDG and harness-specific root overrides stay isolated", () => {
   );
   assert.equal(
     liveDirectoryFor(findNativeProfile("gemini-cli"), paths, {
-      GEMINI_CLI_HOME: "/tmp/gemini-home",
+      GEMINI_CLI_HOME: resolve("/tmp/gemini-home"),
     }),
-    "/tmp/gemini-home/.gemini",
+    join(resolve("/tmp/gemini-home"), ".gemini"),
   );
+  const piAgent = resolve("/tmp/pi-agent");
   assert.equal(
     liveDirectoryFor(findNativeProfile("pi"), paths, {
-      PI_CODING_AGENT_DIR: "/tmp/pi-agent",
+      PI_CODING_AGENT_DIR: piAgent,
     }),
-    "/tmp/pi-agent",
+    piAgent,
   );
 });
