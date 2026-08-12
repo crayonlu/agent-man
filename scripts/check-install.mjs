@@ -45,7 +45,11 @@ if (npmCli === undefined) {
 
   try {
     if (process.argv.includes("--github")) {
-      runNpm(["install", "--global", "git+https://github.com/crayonlu/agent-man.git"]);
+      runNpm([
+        "install",
+        "--global",
+        "https://github.com/crayonlu/agent-man/releases/latest/download/agent-man.tgz",
+      ]);
     } else {
       runNpm(["pack", "--pack-destination", artifacts]);
       const tarballName = readdirSync(artifacts).find((name) => name.endsWith(".tgz"));
@@ -90,7 +94,9 @@ if (npmCli === undefined) {
       throw new Error("The CLI did not install its skill into isolated agent directories.");
     }
 
-    const sourceLabel = process.argv.includes("--github") ? "GitHub package" : "local tarball";
+    const sourceLabel = process.argv.includes("--github")
+      ? "GitHub Release package"
+      : "local tarball";
     console.log(
       `Installed ${sourceLabel} CLI and bundled Agent Skill verified in an isolated prefix.`,
     );

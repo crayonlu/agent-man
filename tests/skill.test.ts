@@ -24,6 +24,7 @@ test("the bundled Agent Skill has minimal discovery metadata and matches the CLI
   assert.match(skill, /plan --json/);
   assert.match(skill, /Internal relative symbolic links/);
   assert.match(skill, /Do not force-push/);
+  assert.match(skill, /releases\/latest\/download\/agent-man\.tgz/);
   assert.match(skill, /never request or print a\s+token/i);
   assert.match(skill, /live profile files untouched/);
 });

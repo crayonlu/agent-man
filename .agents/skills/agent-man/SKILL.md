@@ -35,7 +35,7 @@ If the CLI is absent, ask before installing global software, then install direct
 GitHub repository:
 
 ```bash
-npm install --global git+https://github.com/crayonlu/agent-man.git
+npm install --global https://github.com/crayonlu/agent-man/releases/latest/download/agent-man.tgz
 agent-man --version
 ```
 
