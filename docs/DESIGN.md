@@ -44,7 +44,8 @@ as an update channel for private configuration repositories.
 A built-in profile must declare:
 
 1. A documented native root and any official environment override.
-2. An exact allowlist of portable files and directories.
+2. An exact allowlist of portable files/directories plus narrowly scoped file patterns where the
+   harness documents a named-file convention (for example Codex `*.config.toml`).
 3. A risk label for every allowlisted path: `configuration` or `active`.
 4. Targeted validators where a native format can embed credentials.
 5. An official non-mutating verification command when one exists.
@@ -54,13 +55,31 @@ A new profile is rejected when its proposed root mixes portable configuration wi
 runtime state and no stable allowlist can separate them. Supporting “everything under `~/.tool`” is
 not generality; it is an unauditable security boundary.
 
-The current profiles are intentionally small:
+The current profiles are intentionally bounded, not entire home directories:
 
-- xAI documents `GROK_HOME`, user `config.toml`, `sandbox.toml`, user skills, and personal hooks.
-  Plugins/marketplace installations and trust state have different lifecycle/security semantics and
-  are not included.
-- Multiple harnesses document the open `~/.agents/skills` convention, and Grok also documents
-  `~/.agents/commands`. Those assets are native at that location; no conversion occurs.
+- Grok Build uses the documented `GROK_HOME` root. agent-man captures authored config/rules,
+  sandbox/LSP settings, agents, personas, skills, and hooks; authentication, sessions, memory,
+  logs, plugins, and marketplace downloads remain local.
+- Claude Code uses `CLAUDE_CONFIG_DIR` or `~/.claude` and captures the authored global files listed
+  by Anthropic (`CLAUDE.md`, `settings.json`, keybindings, rules, skills, commands, output styles,
+  agents, workflows, and themes). Transcripts, history, auto-memory, plugins, and `.claude.json`
+  stay out of scope.
+- Codex uses `CODEX_HOME` or `~/.codex` and captures `config.toml`, global `AGENTS.md` instructions,
+  and named `*.config.toml` profiles. Auth, sessions, logs, caches, and admin `requirements.toml`
+  are not portable.
+- OpenCode uses `XDG_CONFIG_HOME/opencode` or `~/.config/opencode` and captures global JSON/JSONC
+  and TUI config, `AGENTS.md`, agents, commands, skills, and themes. Plugin installations and the
+  dependency cache are deliberately excluded.
+- Pi uses its documented `$PI_CODING_AGENT_DIR` or `~/.pi/agent` root and captures settings plus authored extensions, skills,
+  prompts, and themes. Pi packages, the package/npm store, trust decisions, and sessions are local.
+- Gemini CLI uses `GEMINI_CLI_HOME/.gemini` or `~/.gemini` and captures user settings, global
+  `GEMINI.md`, keybindings, policies, agents, skills, and custom commands. Authentication, trusted
+  folders, project history, temporary checkpoints, and installed extensions remain local.
+- Multiple harnesses document the open `~/.agents/skills` convention; the `agent-skills` profile keeps
+  that native directory (and its existing commands directory) without converting its contents.
+
+These profiles can coexist in one private repository, but they remain separate native trees. There
+is no implicit cross-profile copy or format conversion.
 
 ## Allowlist and ignore invariants
 
@@ -174,6 +193,17 @@ race. Repository compromise still matters: skills and hooks are code and must be
 - [Grok Build skills, plugins, hooks, and `~/.agents` compatibility](https://docs.x.ai/build/features/skills-plugins-marketplaces)
 - [Grok Build hook/trust locations](https://docs.x.ai/build/features/hooks)
 - [Codex Agent Skills](https://developers.openai.com/codex/skills/)
+- [Codex configuration reference](https://developers.openai.com/codex/config-reference)
+- [Claude Code `.claude` directory](https://code.claude.com/docs/en/claude-directory)
+- [OpenCode configuration](https://opencode.ai/v2/docs/config)
+- [OpenCode Agent Skills](https://opencode.ai/docs/skills/)
+- [OpenCode commands](https://opencode.ai/docs/commands/)
+- [Pi settings](https://pi.dev/docs/latest/settings)
+- [Pi environment variables](https://pi.dev/docs/latest/environment-variables)
+- [Pi skills](https://pi.dev/docs/latest/skills)
+- [Pi extensions](https://pi.dev/docs/latest/extensions)
+- [Gemini CLI configuration](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md)
+- [Gemini CLI custom commands](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/custom-commands.md)
 - [Gemini CLI Agent Skills](https://geminicli.com/docs/cli/skills/)
 - [Claude Code Agent Skills](https://code.claude.com/docs/en/skills)
 - [Windows symbolic-link privilege guidance](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links)

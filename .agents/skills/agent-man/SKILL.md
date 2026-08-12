@@ -1,6 +1,6 @@
 ---
 name: agent-man
-description: Install, inspect, plan, synchronize, back up, and restore native AI agent configuration surfaces with agent-man and Git. Use when asked to keep Grok Build configuration or shared Agent Skills consistent across devices, to install agent-man for another agent, or to diagnose an agent-man repository. Do not use for cross-harness conversion, arbitrary dotfiles, project-local configuration, credentials, sessions, history, logs, caches, trust state, or provider switching.
+description: Install, inspect, plan, synchronize, back up, and restore selected native AI harness configuration surfaces with agent-man and Git. Use when asked to keep Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok Build, or shared Agent Skills consistent across devices. Do not use for cross-harness conversion, arbitrary dotfiles, project-local configuration, credentials, sessions, history, logs, caches, trust state, or provider switching.
 ---
 
 # Agent Man
@@ -15,8 +15,8 @@ native files and never invents a shared schema or translates between harnesses.
   without opening file contents.
 - A built-in profile allowlist is the maximum management boundary. `.gitignore` may narrow that
   boundary; never edit it merely to make an unsupported path synchronize.
-- Treat `active` entries such as skills, commands, and hooks as executable code. Tell the user when
-  a plan changes them.
+- Treat `active` entries such as skills, commands, hooks, workflows, agents, personas, and Pi
+  extensions as executable code. Tell the user when a plan changes them.
 - Internal relative symbolic links are portable. Absolute, external, broken, and out-of-profile
   links are device-local bindings: do not follow, replace, upload, or work around them. Stop if a
   stored link would resolve through a local binding on this device.
@@ -84,14 +84,21 @@ List the supported roots and exact allowlists:
 agent-man profiles --json
 ```
 
-Then enable only the requested profile. `grok` uses `$GROK_HOME` or `~/.grok`; `agent-skills` uses
-`~/.agents`:
+Then enable only the requested native profiles. The built-in roots are `grok` (`$GROK_HOME` or
+`~/.grok`), `claude-code` (`$CLAUDE_CONFIG_DIR` or `~/.claude`), `codex` (`$CODEX_HOME` or
+`~/.codex`), `opencode` (`$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`), `pi`
+(`$PI_CODING_AGENT_DIR` or `~/.pi/agent`), `gemini-cli` (`$GEMINI_CLI_HOME/.gemini` or `~/.gemini`), and `agent-skills`
+(`~/.agents`):
 
 ```bash
 agent-man add grok
-# or
-agent-man add agent-skills
+# Repeat `agent-man add <profile>` for each deliberately selected surface.
+# Examples: agent-man add claude-code; agent-man add codex; agent-man add opencode; agent-man add gemini-cli
 ```
+
+Profiles are native and independent. Do not ask agent-man to translate a Claude, Codex, Pi,
+OpenCode, or Grok file into another harness format. If the same authored skill is wanted in two
+harnesses, explicitly manage both native locations and review both active copies.
 
 After `add`, perform the standard gate:
 

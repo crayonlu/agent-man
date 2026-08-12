@@ -13,6 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { initialize, Output } from "../src/commands.js";
+import { walkPortableTree } from "../src/files.js";
 import { resolveAppPaths } from "../src/paths.js";
 import { findNativeProfile, profileIgnoreContents } from "../src/profiles.js";
 import { hardenRepository } from "../src/git.js";
@@ -278,6 +279,45 @@ test("a fetched tree is rejected before checkout when it contains inline credent
     runCommand("git", ["commit", "-m", "Unsafe secret"], { cwd: root });
 
     assert.throws(() => validateReferenceScope(root, "HEAD"), /inline credential field/);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("JSON configuration credentials are rejected for native profiles", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-json-secret-"));
+  try {
+    runCommand("git", ["init", "-b", "main", root]);
+    configureGit(root);
+    mkdirSync(join(root, ".claude-code"), { recursive: true });
+    writeFileSync(
+      join(root, ".claude-code", ".gitignore"),
+      profileIgnoreContents(findNativeProfile("claude-code")),
+    );
+    writeFileSync(join(root, ".claude-code", "settings.json"), '{"apiKey":"must-not-land"}\n');
+    runCommand("git", ["add", "-f", ".claude-code/.gitignore", ".claude-code/settings.json"], {
+      cwd: root,
+    });
+    runCommand("git", ["commit", "-m", "Unsafe JSON secret"], { cwd: root });
+
+    assert.throws(() => validateReferenceScope(root, "HEAD"), /inline credential field/);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("Codex named config profiles stay inside the root file pattern", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-codex-pattern-"));
+  try {
+    const codex = join(root, "codex");
+    mkdirSync(codex, { recursive: true });
+    writeFileSync(join(codex, "review.config.toml"), 'model = "gpt-5"\n');
+    writeFileSync(join(codex, "not-portable.txt"), "local\n");
+    const scan = walkPortableTree(codex, findNativeProfile("codex"));
+    assert.deepEqual(
+      scan.entries.map((entry) => entry.relativePath),
+      ["review.config.toml"],
+    );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

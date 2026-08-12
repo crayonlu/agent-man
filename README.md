@@ -1,8 +1,8 @@
 # agent-man
 
-`agent-man` keeps one native AI agent configuration surface consistent across devices with ordinary
-Git. It does not convert configuration between harnesses and is deliberately not a general dotfiles
-manager.
+`agent-man` keeps one or more native AI agent configuration surfaces consistent across devices with
+ordinary Git. It does not convert configuration between harnesses and is deliberately not a general
+dotfiles manager.
 
 The project stays small by giving existing tools one job each:
 
@@ -16,14 +16,26 @@ schema, or force-push protocol. The architectural invariants and research behind
 
 ## Supported native profiles
 
-| Profile        | Native root               | Portable allowlist                                 | Why it exists                                                      |
-| -------------- | ------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ |
-| `grok`         | `$GROK_HOME` or `~/.grok` | `config.toml`, `sandbox.toml`, `skills/`, `hooks/` | Grok Build's documented user configuration and authored extensions |
-| `agent-skills` | `~/.agents`               | `skills/`, `commands/`                             | Open agent assets consumed natively by compatible harnesses        |
+| Profile        | Native root                                         | Portable authored surface                                                     |
+| -------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `grok`         | `$GROK_HOME` or `~/.grok`                           | config, sandbox/LSP files, rules, agents, personas, skills, hooks             |
+| `claude-code`  | `$CLAUDE_CONFIG_DIR` or `~/.claude`                 | `CLAUDE.md`, settings/keybindings, rules, skills, commands, agents, workflows |
+| `codex`        | `$CODEX_HOME` or `~/.codex`                         | `config.toml`, `AGENTS*.md`, root `*.config.toml` named profiles              |
+| `opencode`     | `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` | JSON/JSONC/TUI config, `AGENTS.md`, agents, commands, skills, themes          |
+| `pi`           | `$PI_CODING_AGENT_DIR` or `~/.pi/agent`             | `settings.json`, extensions, skills, prompts, themes                          |
+| `gemini-cli`   | `$GEMINI_CLI_HOME/.gemini` or `~/.gemini`           | settings/context, keybindings, agents, policies, skills, commands             |
+| `agent-skills` | `~/.agents`                                         | `skills/`, `commands/`                                                        |
 
 Unknown paths are unmanaged even if a `.gitignore` negation tries to include them. Credentials,
-sessions, history, memory, logs, caches, crash data, trust decisions, installed marketplaces, and
-project-local configuration never enter the portable surface.
+sessions, history, memory, logs, caches, crash data, trust decisions, downloaded packages, plugins,
+and project-local configuration never enter the portable surface. A profile is a native copy: agent-
+man does not translate a Claude skill into a Codex skill or mirror one profile into another.
+
+Enable only the surfaces you actually use. `agent-man profiles --json` is the authoritative list of
+roots and allowlists. OpenCode follows the documented XDG layout, so `XDG_CONFIG_HOME=/path` maps to
+`/path/opencode`; Claude Code and Codex overrides name their complete native roots. Gemini CLI's
+`GEMINI_CLI_HOME` is its parent home and maps to `$GEMINI_CLI_HOME/.gemini`. Pi's
+`PI_CODING_AGENT_DIR` names its complete native root.
 
 ## Requirements and installation
 
@@ -41,7 +53,7 @@ agent-man --version
 The npm package name is `@crayonlu/agent-man`; the executable remains `agent-man`. The package is
 installed from a built GitHub Release asset, so the target machine needs no TypeScript toolchain and
 no npm-registry publication is required. To pin this release, use
-`https://github.com/crayonlu/agent-man/releases/download/v0.2.0/agent-man.tgz`.
+`https://github.com/crayonlu/agent-man/releases/download/v0.3.0/agent-man.tgz`.
 
 ## Give agent-man to an agent
 
@@ -70,10 +82,10 @@ For Codex, the skill can also be installed before the CLI:
 
 Then give Codex this request:
 
-> Use `$agent-man` to inspect, plan, and synchronize my Grok Build configuration with a private
+> Use `$agent-man` to inspect, plan, and synchronize the native profiles I select with a private
 > GitHub repository named `agent-man-config`. Do not convert formats or read file contents. Show me
-> `doctor --json` and `plan --json` results before the first sync, and call out changes to skills or
-> hooks as executable code.
+> `profiles --json`, `doctor --json`, and `plan --json` before the first sync, and call out changes to
+> skills, commands, hooks, workflows, agents, personas, extensions, or sandbox policy as executable code.
 
 For another compatible harness, replace `$agent-man` with “the installed agent-man skill” (or use
 `/agent-man` when that harness exposes user skills as slash commands).
@@ -87,8 +99,8 @@ risk labels, and counts—never configuration contents.
 # Creates a private repository from crayonlu/agent-man-config-template when absent.
 agent-man init --github agent-man-config
 
-agent-man profiles
-agent-man add grok
+agent-man profiles --json
+agent-man add claude-code       # repeat for codex, opencode, pi, gemini-cli, grok, or agent-skills
 agent-man doctor
 agent-man plan
 agent-man sync
@@ -173,7 +185,8 @@ the private internal repository for routine exclusions.
 Links are configuration structure, not aliases to content that agent-man should follow:
 
 - The selected surface root itself may be a symlink; it is explicitly resolved once as the trust
-  root. Set `GROK_HOME` when a different Grok root is intentional.
+  root. Set the profile's documented root override (`GROK_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `XDG_CONFIG_HOME`, `PI_CODING_AGENT_DIR`, or `GEMINI_CLI_HOME`) when a different root is intentional.
 - A nested relative link is portable only when its lexical target and complete link chain stay
   inside the same allowlisted surface and the target exists. Its portable link text is stored;
   Windows-native relative separators are canonicalized to `/`.
@@ -225,8 +238,9 @@ instead of silently changing permissions on a broad path.
 ## Security model
 
 - Keep the configuration repository private. GitHub is not a credential manager.
-- Grok `config.toml` receives targeted checks for inline API keys, authorization headers, and
-  secret-like environment assignments. Prefer `env_key`, `bearer_token_env_var`, and `${VAR}`.
+- Native config files that support credential-bearing fields receive targeted checks for inline API
+  keys, authorization headers, and secret-like assignments. Prefer `env_key`,
+  `bearer_token_env_var`, and `${VAR}` references; never commit a token.
 - File count, depth, individual size, and total size are bounded. Windows-reserved names,
   case-insensitive collisions, Unicode-normalization collisions, special files, submodules, and
   unmanaged Git modes are rejected.
@@ -234,8 +248,8 @@ instead of silently changing permissions on a broad path.
   attributes may set only text/EOL behavior; nested attributes, filters, external diff/merge
   drivers, recursive submodules, repository hooks, and filesystem-monitor hooks are not part of the
   synchronization protocol.
-- Skills, commands, hooks, and sandbox policy are labeled `active` because they can change agent or
-  machine behavior. Review them like code.
+- Skills, commands, hooks, workflows, agents, personas, extensions, and sandbox policy are labeled
+  `active` because they can change agent or machine behavior. Review them like code.
 - The scanner is defense in depth, not a guarantee that arbitrary prose contains no secret. Never
   intentionally put secrets in a managed file.
 
@@ -260,12 +274,13 @@ npm run install:check
 npm run test:grok
 ```
 
-The normal suite uses temporary HOME, `GROK_HOME`, `AGENT_MAN_HOME`, Git worktrees, and local bare
-remotes. It covers two-device synchronization, conflicts, restore, path and secret rejection, Git
-object preflight, symlink modes and chains, materialized symlinks, local bindings, crash-journal
-recovery, stale locks, JSON, and Skill installation.
-`test:grok` runs `grok inspect` with isolated HOME/XDG/Grok directories and skips cleanly when Grok
-Build is unavailable. No test reads or writes the developer's real harness directories.
+The normal suite uses temporary HOME, harness override roots, `AGENT_MAN_HOME`, Git worktrees, and
+local bare remotes. It covers two-device synchronization, conflicts, restore, path and secret
+rejection, Git object preflight, symlink modes and chains, materialized symlinks, local bindings,
+crash-journal recovery, stale locks, JSON, and Skill installation. `test:grok` uses isolated
+directories and skips cleanly when Grok Build is unavailable. Real Pi, Claude Code, Codex, OpenCode,
+Gemini CLI, and Grok installations are exercised only by the GitHub Actions `harnesses` workflow,
+never by the developer's machine or the normal local suite.
 
 CI runs Node.js 22 and 24 on Linux, macOS, and Windows. The project has zero runtime dependencies and
 is licensed under the [MIT License](LICENSE).

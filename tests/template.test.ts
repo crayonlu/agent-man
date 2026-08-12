@@ -30,6 +30,9 @@ test("each generated profile ignore file documents the exact built-in allowlist"
     for (const file of profile.portableFiles) {
       assert.equal(contents.includes(`!${file.relativePath}\n`), true);
     }
+    for (const pattern of profile.portableFilePatterns ?? []) {
+      assert.equal(contents.includes(`!/${pattern.glob}\n`), true);
+    }
     for (const directory of profile.portableDirectories) {
       assert.equal(contents.includes(`!${directory.relativePath}/\n`), true);
       assert.equal(contents.includes(`!${directory.relativePath}/**\n`), true);

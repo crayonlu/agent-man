@@ -36,7 +36,12 @@ Usage:
   agent-man skill install [--target agents|claude|all] [--force] [--json]
 
 Profiles:
-  grok           $GROK_HOME or ~/.grok: config.toml, sandbox.toml, skills/, hooks/
+  grok           $GROK_HOME or ~/.grok: authored config, rules, agents, personas, skills, hooks
+  claude-code    $CLAUDE_CONFIG_DIR or ~/.claude: authored instructions, settings, skills, agents
+  codex          $CODEX_HOME or ~/.codex: config.toml, AGENTS.md, named config profiles
+  opencode       $XDG_CONFIG_HOME/opencode or ~/.config/opencode: config, agents, commands, skills
+  pi             $PI_CODING_AGENT_DIR or ~/.pi/agent: settings, extensions, skills, prompts, themes
+  gemini-cli     $GEMINI_CLI_HOME/.gemini or ~/.gemini: settings, context, agents, policies, skills
   agent-skills   ~/.agents: skills/, commands/
 
 Semantics:

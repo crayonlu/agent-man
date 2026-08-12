@@ -149,7 +149,7 @@ test("an inline credential in Grok config is rejected without printing its value
 
     writeFileSync(
       join(device.grok, "config.toml"),
-      'headers = { "Authorization" = "Bearer ${OPENAI_API_KEY}" }\n',
+      'api_key = "${OPENAI_API_KEY}"\nheaders = { "Authorization" = "Bearer ${OPENAI_API_KEY}" }\n',
     );
     assert.equal(addProfile("grok", device.context).profile, "grok");
   } finally {

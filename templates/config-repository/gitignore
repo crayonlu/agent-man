@@ -4,6 +4,11 @@
 !/.gitattributes
 !/README.md
 !/.grok/
+!/.claude-code/
+!/.codex/
+!/.opencode/
+!/.pi-agent/
+!/.gemini/
 !/.agents/
 
 # Add rules below to narrow synchronization further. Built-in profile allowlists cannot be widened.

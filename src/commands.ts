@@ -54,7 +54,6 @@ import {
   seedTemplateFiles,
   stageManagedRepository,
   validateReferenceScope,
-  validateRepositoryControls,
   validateRepositoryScope,
 } from "./repository.js";
 import {
@@ -338,9 +337,7 @@ function initializeFresh(mode: InitMode, context: CommandContext): InitReport {
   seedTemplateFiles(context.paths);
 
   if (mode.kind === "local") {
-    validateRepositoryControls(context.paths.repositoryDirectory, runner);
     stageManagedRepository(context.paths.repositoryDirectory, runner);
-    validateRepositoryScope(context.paths.repositoryDirectory, runner);
     if (hasStagedChanges(context.paths.repositoryDirectory, runner)) {
       commit(context.paths.repositoryDirectory, "Initialize agent-man configuration", runner);
     }

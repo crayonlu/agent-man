@@ -1,0 +1,65 @@
+name: Harnesses
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harnesses-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-native-profile:
+    name: ${{ matrix.harness }} / isolated native profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - harness: claude-code
+            package: "@anthropic-ai/claude-code"
+          - harness: codex
+            package: "@openai/codex"
+          - harness: grok
+            package: "@xai-official/grok"
+          - harness: gemini-cli
+            package: "@google/gemini-cli"
+          - harness: opencode
+            package: "opencode-ai"
+          - harness: pi
+            package: "@earendil-works/pi-coding-agent"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: npm
+          node-version: 24
+
+      - name: Install agent-man dependencies
+        run: npm ci
+
+      - name: Install the real harness on the ephemeral runner
+        env:
+          HARNESS_PACKAGE: ${{ matrix.package }}
+          HARNESS_ID: ${{ matrix.harness }}
+        run: |
+          if [ "$HARNESS_ID" = "pi" ]; then
+            npm install --global --ignore-scripts "$HARNESS_PACKAGE"
+          else
+            npm install --global "$HARNESS_PACKAGE"
+          fi
+
+      - name: Probe the native profile with isolated HOME
+        env:
+          HARNESS_UNDER_TEST: ${{ matrix.harness }}
+        run: npm run test:harness

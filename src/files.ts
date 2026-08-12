@@ -21,7 +21,13 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { AppError, errorMessage } from "./errors.js";
-import { EntryRisk, NativeProfile, isPortablePath, riskForPath } from "./profiles.js";
+import {
+  EntryRisk,
+  NativeProfile,
+  isPortableFile,
+  isPortablePath,
+  riskForPath,
+} from "./profiles.js";
 
 export const MAX_MANAGED_DEPTH = 32;
 export const MAX_MANAGED_ENTRIES = 10_000;
@@ -504,6 +510,13 @@ export function walkPortableTree(root: string, profile: NativeProfile): TreeScan
   }
   for (const directory of profile.portableDirectories) {
     visit(directory.relativePath, true);
+  }
+  if (profile.portableFilePatterns !== undefined) {
+    for (const child of readdirSync(physicalRoot)) {
+      if (isPortableFile(profile, child)) {
+        visit(child, false);
+      }
+    }
   }
   validatePortablePathSet([
     ...entries.map((entry) => entry.relativePath),

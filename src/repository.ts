@@ -48,6 +48,7 @@ import {
   EntryRisk,
   NATIVE_PROFILES,
   NativeProfile,
+  isPortableFile,
   isPortablePath,
   liveDirectoryFor,
   profileIgnoreContents,
@@ -172,14 +173,14 @@ function filteredBindings(
 function inlineSecretDetected(contents: string): boolean {
   for (const sourceLine of contents.split(/\r?\n/u)) {
     const line = sourceLine.trim();
-    if (line === "" || line.startsWith("#")) {
+    if (line === "" || line.startsWith("#") || line.startsWith("//")) {
       continue;
     }
-    if (/^(?:["']?api_key["']?)\s*=/iu.test(line)) {
+    if (/^(?:["']?api[_-]?key["']?)\s*(?:=|:)/iu.test(line) && !line.includes("${")) {
       return true;
     }
     const sensitiveHeader =
-      /(?:^|[{,]\s*)["']?(?:authorization|x-api-key|[a-z0-9_]*(?:api[_-]?key|access[_-]?token|secret|password)[a-z0-9_]*)["']?\s*=\s*["'][^"']+["']/iu;
+      /(?:^|[{,]\s*)["']?(?:authorization|x-api-key|[a-z0-9_]*(?:api[_-]?key|access[_-]?token|secret|password)[a-z0-9_]*)["']?\s*(?:=|:)\s*["'][^"']+["']/iu;
     if (sensitiveHeader.test(line) && !line.includes("${")) {
       return true;
     }
@@ -194,10 +195,7 @@ function validatePortableText(contents: string, path: string, code: string): voi
 }
 
 function validateEntrySecrets(profile: NativeProfile, root: string, entry: TreeEntry): void {
-  if (
-    entry.kind !== "file" ||
-    !profile.portableFiles.some((file) => file.relativePath === entry.relativePath)
-  ) {
+  if (entry.kind !== "file" || !isPortableFile(profile, entry.relativePath)) {
     return;
   }
   const contents = readManagedFile(root, entry.relativePath).toString("utf8");
@@ -698,10 +696,7 @@ export function validateReferenceScope(
         "TRACKED_PATH_UNMANAGED",
       );
     }
-    if (
-      entry.kind === "file" &&
-      profile.portableFiles.some((file) => file.relativePath === relativePath)
-    ) {
+    if (entry.kind === "file" && isPortableFile(profile, relativePath)) {
       const contents = treeObjectText(repository, entry, textCache, runner);
       if (shouldScanForSecrets(profile, relativePath) && inlineSecretDetected(contents)) {
         throw new AppError(
