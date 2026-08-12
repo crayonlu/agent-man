@@ -104,9 +104,21 @@ if (harness === undefined || !(harness in definitions)) {
     XDG_CACHE_HOME: join(root, "xdg-cache"),
     XDG_DATA_HOME: join(root, "xdg-data"),
   };
-  delete environment.ANTHROPIC_API_KEY;
-  delete environment.OPENAI_API_KEY;
-  delete environment.XAI_API_KEY;
+  for (const key of Object.keys(environment)) {
+    if (/(?:api[_-]?key|token|secret|password|credential|auth)/iu.test(key)) {
+      delete environment[key];
+    }
+  }
+  for (const key of [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GEMINI_CLI_HOME",
+    "GROK_HOME",
+    "PI_CODING_AGENT_DIR",
+    "XDG_CONFIG_HOME",
+  ]) {
+    delete environment[key];
+  }
 
   function runAgentMan(arguments_) {
     const result = spawnSync(process.execPath, ["dist/src/cli.js", ...arguments_], {
