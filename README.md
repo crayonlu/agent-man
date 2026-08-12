@@ -53,7 +53,7 @@ agent-man --version
 The npm package name is `@crayonlu/agent-man`; the executable remains `agent-man`. The package is
 installed from a built GitHub Release asset, so the target machine needs no TypeScript toolchain and
 no npm-registry publication is required. To pin this release, use
-`https://github.com/crayonlu/agent-man/releases/download/v0.3.0/agent-man.tgz`.
+`https://github.com/crayonlu/agent-man/releases/download/v0.3.1/agent-man.tgz`.
 
 ## Give agent-man to an agent
 

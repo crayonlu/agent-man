@@ -1,6 +1,6 @@
 {
   "name": "@crayonlu/agent-man",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Safe Git-backed synchronization for native AI agent configuration surfaces",
   "type": "module",
   "bin": {
