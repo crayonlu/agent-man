@@ -5,15 +5,24 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { addHarness, CommandContext, initialize, Output, sync } from "../src/commands.js";
+import { listBackups } from "../src/backups.js";
+import {
+  addProfile,
+  CommandContext,
+  initialize,
+  Output,
+  restore,
+  showPlan,
+  sync,
+} from "../src/commands.js";
 import { resolveAppPaths } from "../src/paths.js";
 import { runCommand } from "../src/process.js";
 
@@ -28,14 +37,16 @@ class MemoryOutput implements Output {
 interface TestDevice {
   readonly context: CommandContext;
   readonly environment: NodeJS.ProcessEnv;
+  readonly grok: string;
   readonly home: string;
 }
 
 function makeDevice(root: string, name: string): TestDevice {
   const home = join(root, `${name}-home`);
   const state = join(root, `${name}-state`);
+  const grok = join(home, ".grok");
   mkdirSync(home, { recursive: true });
-  const environment: NodeJS.ProcessEnv = { AGENT_MAN_HOME: state, HOME: home };
+  const environment: NodeJS.ProcessEnv = { AGENT_MAN_HOME: state, GROK_HOME: grok, HOME: home };
   return {
     context: {
       environment,
@@ -43,6 +54,7 @@ function makeDevice(root: string, name: string): TestDevice {
       paths: resolveAppPaths(environment),
     },
     environment,
+    grok,
     home,
   };
 }
@@ -62,25 +74,36 @@ function trackedFiles(repository: string): readonly string[] {
     .filter((path) => path !== "");
 }
 
-test("Grok capture uses Git ignore rules and never stores credentials", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-man-ignore-"));
+function initializeWithRemote(device: TestDevice, remote: string): void {
+  initialize({ kind: "local" }, device.context);
+  configureGit(device.context.paths.repositoryDirectory);
+  runCommand("git", ["remote", "add", "origin", remote], {
+    cwd: device.context.paths.repositoryDirectory,
+  });
+}
+
+test("Grok capture is allowlist-first and Git ignore rules can only narrow it", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-allowlist-"));
   try {
     const device = makeDevice(root, "primary");
     initialize({ kind: "local" }, device.context);
     configureGit(device.context.paths.repositoryDirectory);
 
-    const grok = join(device.home, ".grok");
-    mkdirSync(join(grok, "sessions"), { recursive: true });
-    writeFileSync(join(grok, "config.toml"), '[models]\ndefault = "grok-build"\n');
-    writeFileSync(join(grok, "auth.json"), '{"token":"never-sync"}\n');
-    writeFileSync(join(grok, "sessions", "session.json"), "runtime state\n");
-    writeFileSync(join(grok, "local-only.txt"), "device specific\n");
-    appendFileSync(
-      join(device.context.paths.repositoryDirectory, ".gitignore"),
-      "\n.grok/local-only.txt\n",
-    );
+    mkdirSync(join(device.grok, "sessions"), { recursive: true });
+    mkdirSync(join(device.grok, "skills", "public"), { recursive: true });
+    mkdirSync(join(device.grok, "skills", "private"), { recursive: true });
+    writeFileSync(join(device.grok, "config.toml"), '[models]\ndefault = "grok-build"\n');
+    writeFileSync(join(device.grok, "auth.json"), '{"token":"never-sync"}\n');
+    writeFileSync(join(device.grok, "sessions", "session.json"), "runtime state\n");
+    writeFileSync(join(device.grok, "unknown.txt"), "outside allowlist\n");
+    writeFileSync(join(device.grok, "skills", "public", "SKILL.md"), "# Public\n");
+    writeFileSync(join(device.grok, "skills", "private", "SKILL.md"), "# Private\n");
 
-    addHarness("grok", device.context);
+    addProfile("grok", device.context);
+    appendFileSync(
+      join(device.context.paths.repositoryDirectory, ".grok", ".gitignore"),
+      "\nskills/private/**\n",
+    );
     sync(device.context);
 
     const repository = device.context.paths.repositoryDirectory;
@@ -90,212 +113,280 @@ test("Grok capture uses Git ignore rules and never stores credentials", () => {
     );
     assert.equal(existsSync(join(repository, ".grok", "auth.json")), false);
     assert.equal(existsSync(join(repository, ".grok", "sessions")), false);
-    assert.equal(existsSync(join(repository, ".grok", "local-only.txt")), false);
+    assert.equal(existsSync(join(repository, ".grok", "unknown.txt")), false);
+    assert.equal(existsSync(join(repository, ".grok", "skills", "private", "SKILL.md")), false);
+    assert.equal(existsSync(join(repository, ".grok", "skills", "public", "SKILL.md")), true);
     assert.deepEqual(
       trackedFiles(repository).filter((path) => path.startsWith(".grok/")),
-      [".grok/config.toml"],
+      [".grok/.gitignore", ".grok/config.toml", ".grok/skills/public/SKILL.md"],
     );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
 });
 
-test("two devices exchange native Grok config while preserving local auth and backups", () => {
+test("an inline credential in Grok config is rejected without printing its value", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-secret-"));
+  try {
+    const device = makeDevice(root, "primary");
+    initialize({ kind: "local" }, device.context);
+    configureGit(device.context.paths.repositoryDirectory);
+    mkdirSync(device.grok, { recursive: true });
+    writeFileSync(
+      join(device.grok, "config.toml"),
+      'env = { OPENAI_API_KEY = "super-secret-value" }\n',
+    );
+
+    let message = "";
+    try {
+      addProfile("grok", device.context);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    assert.match(message, /inline credential field/);
+    assert.equal(message.includes("super-secret-value"), false);
+    assert.equal(existsSync(join(device.context.paths.repositoryDirectory, ".grok")), false);
+
+    writeFileSync(
+      join(device.grok, "config.toml"),
+      'headers = { "Authorization" = "Bearer ${OPENAI_API_KEY}" }\n',
+    );
+    assert.equal(addProfile("grok", device.context).profile, "grok");
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("a failed profile add rolls back its worktree and staged index entries", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-add-rollback-"));
+  try {
+    const device = makeDevice(root, "primary");
+    initialize({ kind: "local" }, device.context);
+    configureGit(device.context.paths.repositoryDirectory);
+    mkdirSync(device.grok, { recursive: true });
+    writeFileSync(join(device.grok, "config.toml"), 'theme = "dark"\n');
+    writeFileSync(
+      join(device.context.paths.repositoryDirectory, ".gitattributes"),
+      "* filter=unexpected\n",
+    );
+
+    assert.throws(() => addProfile("grok", device.context), /text and eol behavior/);
+    assert.equal(existsSync(join(device.context.paths.repositoryDirectory, ".grok")), false);
+    assert.equal(
+      runCommand("git", ["diff", "--cached", "--name-only"], {
+        cwd: device.context.paths.repositoryDirectory,
+      }).stdout,
+      "",
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("two devices exchange native config transactionally and a backup can be restored", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-man-devices-"));
   try {
     const remote = join(root, "config.git");
     runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
 
     const first = makeDevice(root, "first");
-    initialize({ kind: "local" }, first.context);
-    configureGit(first.context.paths.repositoryDirectory);
-    runCommand("git", ["remote", "add", "origin", remote], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-
-    const firstGrok = join(first.home, ".grok");
-    mkdirSync(firstGrok, { recursive: true });
-    writeFileSync(join(firstGrok, "config.toml"), 'theme = "dark"\n');
-    writeFileSync(join(firstGrok, "auth.json"), '{"device":"first"}\n');
-    addHarness("grok", first.context);
+    initializeWithRemote(first, remote);
+    mkdirSync(first.grok, { recursive: true });
+    writeFileSync(join(first.grok, "config.toml"), 'theme = "dark"\n');
+    writeFileSync(join(first.grok, "auth.json"), '{"device":"first"}\n');
+    addProfile("grok", first.context);
     sync(first.context);
 
     const second = makeDevice(root, "second");
-    const secondGrok = join(second.home, ".grok");
-    mkdirSync(secondGrok, { recursive: true });
-    writeFileSync(join(secondGrok, "auth.json"), '{"device":"second"}\n');
+    mkdirSync(second.grok, { recursive: true });
+    writeFileSync(join(second.grok, "auth.json"), '{"device":"second"}\n');
     initialize({ kind: "remote", url: remote }, second.context);
     configureGit(second.context.paths.repositoryDirectory);
 
-    assert.equal(readFileSync(join(secondGrok, "config.toml"), "utf8"), 'theme = "dark"\n');
-    assert.equal(readFileSync(join(secondGrok, "auth.json"), "utf8"), '{"device":"second"}\n');
+    assert.equal(readFileSync(join(second.grok, "config.toml"), "utf8"), 'theme = "dark"\n');
+    assert.equal(readFileSync(join(second.grok, "auth.json"), "utf8"), '{"device":"second"}\n');
 
-    writeFileSync(join(secondGrok, "config.toml"), 'theme = "light"\n');
+    writeFileSync(join(second.grok, "config.toml"), 'theme = "light"\n');
     sync(second.context);
+    const plan = showPlan(first.context);
+    assert.deepEqual(plan.remoteChanges, [
+      {
+        operation: "apply-add-or-modify",
+        path: ".grok/config.toml",
+        profile: "grok",
+        risk: "configuration",
+      },
+    ]);
     sync(first.context);
 
-    assert.equal(readFileSync(join(firstGrok, "config.toml"), "utf8"), 'theme = "light"\n');
-    assert.equal(readFileSync(join(firstGrok, "auth.json"), "utf8"), '{"device":"first"}\n');
-
-    const backupDates = readdirSync(first.context.paths.backupDirectory);
-    assert.equal(backupDates.length > 0, true);
+    assert.equal(readFileSync(join(first.grok, "config.toml"), "utf8"), 'theme = "light"\n');
+    assert.equal(readFileSync(join(first.grok, "auth.json"), "utf8"), '{"device":"first"}\n');
+    const backup = listBackups(first.context.paths)[0];
+    assert.notEqual(backup, undefined);
+    if (backup !== undefined) {
+      const result = restore(backup.id, first.context);
+      assert.equal(result.restored > 0, true);
+      assert.equal(readFileSync(join(first.grok, "config.toml"), "utf8"), 'theme = "dark"\n');
+      assert.notEqual(result.safetyBackup, undefined);
+    }
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
 });
 
-test("a remote deletion is backed up and removed from another device", () => {
+test("remote deletion is backed up and removed from another device", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-man-delete-"));
   try {
     const remote = join(root, "config.git");
     runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
 
     const first = makeDevice(root, "first");
-    initialize({ kind: "local" }, first.context);
-    configureGit(first.context.paths.repositoryDirectory);
-    runCommand("git", ["remote", "add", "origin", remote], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-    const firstGrok = join(first.home, ".grok");
-    mkdirSync(join(firstGrok, "skills", "demo"), { recursive: true });
-    writeFileSync(join(firstGrok, "config.toml"), "enabled = true\n");
-    writeFileSync(join(firstGrok, "skills", "demo", "SKILL.md"), "# Demo\n");
-    addHarness("grok", first.context);
+    initializeWithRemote(first, remote);
+    mkdirSync(join(first.grok, "skills", "demo"), { recursive: true });
+    writeFileSync(join(first.grok, "config.toml"), "enabled = true\n");
+    writeFileSync(join(first.grok, "skills", "demo", "SKILL.md"), "# Demo\n");
+    addProfile("grok", first.context);
     sync(first.context);
 
     const second = makeDevice(root, "second");
     initialize({ kind: "remote", url: remote }, second.context);
     configureGit(second.context.paths.repositoryDirectory);
-    const secondSkill = join(second.home, ".grok", "skills", "demo", "SKILL.md");
+    const secondSkill = join(second.grok, "skills", "demo", "SKILL.md");
     assert.equal(existsSync(secondSkill), true);
 
-    rmSync(join(firstGrok, "skills", "demo", "SKILL.md"));
+    rmSync(join(first.grok, "skills", "demo", "SKILL.md"));
     sync(first.context);
     sync(second.context);
 
     assert.equal(existsSync(secondSkill), false);
-    assert.equal(existsSync(second.context.paths.backupDirectory), true);
+    assert.equal(listBackups(second.context.paths).length > 0, true);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
 });
 
-test("a path newly ignored upstream remains local when Git stops tracking it", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-man-unmanaged-"));
+test("an external skill symlink on one device is a protected local override", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-binding-"));
   try {
     const remote = join(root, "config.git");
     runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
 
     const first = makeDevice(root, "first");
-    initialize({ kind: "local" }, first.context);
-    configureGit(first.context.paths.repositoryDirectory);
-    runCommand("git", ["remote", "add", "origin", remote], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-    const firstGrok = join(first.home, ".grok");
-    mkdirSync(firstGrok, { recursive: true });
-    writeFileSync(join(firstGrok, "local-only.txt"), "first device\n");
-    addHarness("grok", first.context);
+    initializeWithRemote(first, remote);
+    mkdirSync(join(first.grok, "skills", "demo"), { recursive: true });
+    writeFileSync(join(first.grok, "skills", "demo", "SKILL.md"), "# Remote\n");
+    addProfile("grok", first.context);
     sync(first.context);
 
     const second = makeDevice(root, "second");
-    initialize({ kind: "remote", url: remote }, second.context);
-    configureGit(second.context.paths.repositoryDirectory);
-    const secondLocalOnly = join(second.home, ".grok", "local-only.txt");
+    const localSkill = join(root, "local-skill");
+    mkdirSync(join(second.grok, "skills"), { recursive: true });
+    mkdirSync(localSkill, { recursive: true });
+    writeFileSync(join(localSkill, "SKILL.md"), "# Local\n");
+    try {
+      symlinkSync(localSkill, join(second.grok, "skills", "demo"), "dir");
+    } catch {
+      t.skip("symbolic links are unavailable on this host");
+      return;
+    }
 
-    appendFileSync(
-      join(first.context.paths.repositoryDirectory, ".gitignore"),
-      "\n.grok/local-only.txt\n",
+    const report = initialize({ kind: "remote", url: remote }, second.context);
+    assert.equal(readFileSync(join(localSkill, "SKILL.md"), "utf8"), "# Local\n");
+    assert.equal(report.appliedProfiles[0]?.protectedBindings, 1);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("a stored link cannot resolve through a device-local binding", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-binding-chain-"));
+  try {
+    const remote = join(root, "config.git");
+    runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
+
+    const first = makeDevice(root, "first");
+    initializeWithRemote(first, remote);
+    mkdirSync(join(first.grok, "skills", "target"), { recursive: true });
+    writeFileSync(join(first.grok, "skills", "target", "SKILL.md"), "# Remote\n");
+    try {
+      symlinkSync("target", join(first.grok, "skills", "current"), "dir");
+    } catch {
+      t.skip("symbolic links are unavailable on this host");
+      return;
+    }
+    addProfile("grok", first.context);
+    sync(first.context);
+
+    const second = makeDevice(root, "second");
+    const localTarget = join(root, "local-target");
+    mkdirSync(join(second.grok, "skills"), { recursive: true });
+    mkdirSync(localTarget, { recursive: true });
+    writeFileSync(join(localTarget, "SKILL.md"), "# Local\n");
+    symlinkSync(localTarget, join(second.grok, "skills", "target"), "dir");
+
+    assert.throws(
+      () => initialize({ kind: "remote", url: remote }, second.context),
+      /resolves through protected local binding/,
     );
-    runCommand("git", ["rm", "--cached", ".grok/local-only.txt"], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-    sync(first.context);
-    sync(second.context);
-
-    assert.equal(readFileSync(secondLocalOnly, "utf8"), "first device\n");
+    assert.equal(readFileSync(join(localTarget, "SKILL.md"), "utf8"), "# Local\n");
+    assert.equal(existsSync(join(second.grok, "skills", "current")), false);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
 });
 
-test("resolving a delete conflict can remove the last managed profile file", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-man-delete-conflict-"));
-  try {
-    const remote = join(root, "config.git");
-    runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
-
-    const first = makeDevice(root, "first");
-    initialize({ kind: "local" }, first.context);
-    configureGit(first.context.paths.repositoryDirectory);
-    runCommand("git", ["remote", "add", "origin", remote], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-    const firstConfig = join(first.home, ".grok", "config.toml");
-    mkdirSync(join(first.home, ".grok"), { recursive: true });
-    writeFileSync(firstConfig, 'theme = "base"\n');
-    addHarness("grok", first.context);
-    sync(first.context);
-
-    const second = makeDevice(root, "second");
-    initialize({ kind: "remote", url: remote }, second.context);
-    configureGit(second.context.paths.repositoryDirectory);
-    const secondConfig = join(second.home, ".grok", "config.toml");
-
-    rmSync(firstConfig);
-    sync(first.context);
-    writeFileSync(secondConfig, 'theme = "second"\n');
-    assert.throws(() => sync(second.context), /live harness files were left unchanged/);
-
-    runCommand("git", ["rm", ".grok/config.toml"], {
-      cwd: second.context.paths.repositoryDirectory,
-    });
-    sync(second.context);
-
-    assert.equal(existsSync(secondConfig), false);
-  } finally {
-    rmSync(root, { force: true, recursive: true });
-  }
-});
-
-test("Git conflicts never write conflict markers into the live harness directory", () => {
+test("Git conflicts never write conflict markers into the live profile", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-man-conflict-"));
   try {
     const remote = join(root, "config.git");
     runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
 
     const first = makeDevice(root, "first");
-    initialize({ kind: "local" }, first.context);
-    configureGit(first.context.paths.repositoryDirectory);
-    runCommand("git", ["remote", "add", "origin", remote], {
-      cwd: first.context.paths.repositoryDirectory,
-    });
-    const firstConfig = join(first.home, ".grok", "config.toml");
-    mkdirSync(join(first.home, ".grok"), { recursive: true });
+    initializeWithRemote(first, remote);
+    mkdirSync(first.grok, { recursive: true });
+    const firstConfig = join(first.grok, "config.toml");
     writeFileSync(firstConfig, 'theme = "base"\n');
-    addHarness("grok", first.context);
+    addProfile("grok", first.context);
     sync(first.context);
 
     const second = makeDevice(root, "second");
     initialize({ kind: "remote", url: remote }, second.context);
     configureGit(second.context.paths.repositoryDirectory);
-    const secondConfig = join(second.home, ".grok", "config.toml");
+    const secondConfig = join(second.grok, "config.toml");
 
     writeFileSync(firstConfig, 'theme = "first"\n');
     sync(first.context);
     writeFileSync(secondConfig, 'theme = "second"\n');
 
-    assert.throws(() => sync(second.context), /live harness files were left unchanged/);
+    assert.throws(() => sync(second.context), /live profile files were left unchanged/);
     assert.equal(readFileSync(secondConfig, "utf8"), 'theme = "second"\n');
     assert.equal(readFileSync(secondConfig, "utf8").includes("<<<<<<<"), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
 
-    const storedConfig = join(second.context.paths.repositoryDirectory, ".grok", "config.toml");
-    writeFileSync(storedConfig, 'theme = "resolved"\n');
-    runCommand("git", ["add", ".grok/config.toml"], {
-      cwd: second.context.paths.repositoryDirectory,
-    });
-    sync(second.context);
-    assert.equal(readFileSync(secondConfig, "utf8"), 'theme = "resolved"\n');
+test("the shared agent-skills profile stores only native skills and commands", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-agent-skills-"));
+  try {
+    const device = makeDevice(root, "primary");
+    initialize({ kind: "local" }, device.context);
+    configureGit(device.context.paths.repositoryDirectory);
+    const agents = join(device.home, ".agents");
+    mkdirSync(join(agents, "skills", "demo"), { recursive: true });
+    mkdirSync(join(agents, "commands"), { recursive: true });
+    mkdirSync(join(agents, "runtime"), { recursive: true });
+    writeFileSync(join(agents, "skills", "demo", "SKILL.md"), "# Demo\n");
+    writeFileSync(join(agents, "commands", "review.md"), "Review this.\n");
+    writeFileSync(join(agents, "runtime", "state.json"), "{}\n");
+
+    addProfile("agent-skills", device.context);
+    sync(device.context);
+
+    const repository = device.context.paths.repositoryDirectory;
+    assert.equal(existsSync(join(repository, ".agents", "skills", "demo", "SKILL.md")), true);
+    assert.equal(existsSync(join(repository, ".agents", "commands", "review.md")), true);
+    assert.equal(existsSync(join(repository, ".agents", "runtime")), false);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

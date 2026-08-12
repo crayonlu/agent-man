@@ -11,6 +11,7 @@ const cli = resolve("dist/src/cli.js");
 interface Device {
   readonly environment: NodeJS.ProcessEnv;
   readonly grok: string;
+  readonly home: string;
   readonly state: string;
 }
 
@@ -35,6 +36,7 @@ function makeDevice(root: string, name: string): Device {
       HOME: home,
     },
     grok,
+    home,
     state,
   };
 }
@@ -45,28 +47,35 @@ function agentMan(device: Device, arguments_: readonly string[]): string {
   }).stdout;
 }
 
-test("the built CLI synchronizes two isolated devices without touching the real home", () => {
+function jsonResult(output: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(output);
+  if (typeof value !== "object" || value === null) {
+    throw new Error("CLI JSON output is not an object.");
+  }
+  return Object.fromEntries(Object.entries(value));
+}
+
+test("the built CLI exposes stable JSON and synchronizes isolated devices", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-man-cli-e2e-"));
   try {
     const remote = join(root, "config.git");
     runCommand("git", ["init", "--bare", "--initial-branch=main", remote]);
 
     const first = makeDevice(root, "first");
-    const firstConfig = join(first.grok, "config.toml");
-    writeFileSync(firstConfig, 'theme = "dark"\n');
+    writeFileSync(join(first.grok, "config.toml"), 'theme = "dark"\n');
     writeFileSync(join(first.grok, "auth.json"), '{"token":"first-secret"}\n');
 
     agentMan(first, ["init", "--local"]);
-    assert.equal(agentMan(first, ["status"]).includes(`grok (${first.grok}): unmanaged`), true);
     runCommand("git", ["remote", "add", "origin", remote], {
       cwd: join(first.state, "repo"),
       env: first.environment,
     });
     agentMan(first, ["add", "grok"]);
-    const pendingStatus = agentMan(first, ["status"]);
-    assert.equal(pendingStatus.includes(`grok (${first.grok}): clean`), true);
-    assert.match(pendingStatus, /A\s+\.grok\/config\.toml/);
-    agentMan(first, ["sync"]);
+    const plan = jsonResult(agentMan(first, ["plan", "--json"]));
+    assert.equal(plan.schemaVersion, 1);
+    assert.equal(plan.command, "plan");
+    assert.equal(plan.ok, true);
+    agentMan(first, ["sync", "--json"]);
 
     const second = makeDevice(root, "second");
     writeFileSync(join(second.grok, "auth.json"), '{"token":"second-secret"}\n');
@@ -77,20 +86,28 @@ test("the built CLI synchronizes two isolated devices without touching the real 
       readFileSync(join(second.grok, "auth.json"), "utf8"),
       '{"token":"second-secret"}\n',
     );
-
-    writeFileSync(join(second.grok, "config.toml"), 'theme = "light"\n');
-    agentMan(second, ["sync"]);
-    agentMan(first, ["sync"]);
-
-    assert.equal(readFileSync(firstConfig, "utf8"), 'theme = "light"\n');
-    assert.equal(readFileSync(join(first.grok, "auth.json"), "utf8"), '{"token":"first-secret"}\n');
-    assert.equal(existsSync(join(first.state, "backups")), true);
+    const status = jsonResult(agentMan(second, ["status", "--json"]));
+    assert.equal(status.schemaVersion, 1);
+    assert.equal(status.ok, true);
 
     const tracked = runCommand("git", ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"])
       .stdout.trim()
       .split("\n");
     assert.equal(tracked.includes(".grok/config.toml"), true);
     assert.equal(tracked.includes(".grok/auth.json"), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("the built CLI installs its bundled skill without touching the real home", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-man-cli-skill-"));
+  try {
+    const device = makeDevice(root, "skill");
+    const result = jsonResult(agentMan(device, ["skill", "install", "--target", "all", "--json"]));
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(join(device.home, ".agents", "skills", "agent-man", "SKILL.md")), true);
+    assert.equal(existsSync(join(device.home, ".claude", "skills", "agent-man", "SKILL.md")), true);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

@@ -15,6 +15,10 @@ if (destinationArgument === undefined) {
   } else {
     mkdirSync(destination, { recursive: true });
     copyFileSync("templates/config-repository/gitignore", resolve(destination, ".gitignore"));
+    copyFileSync(
+      "templates/config-repository/gitattributes",
+      resolve(destination, ".gitattributes"),
+    );
     copyFileSync("templates/config-repository/README.md", resolve(destination, "README.md"));
     console.log(`Exported configuration template to ${destination}`);
   }

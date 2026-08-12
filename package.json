@@ -1,7 +1,7 @@
 {
-  "name": "agent-man",
-  "version": "0.1.0",
-  "description": "Git-backed synchronization for native AI harness configuration directories",
+  "name": "@crayonlu/agent-man",
+  "version": "0.2.0",
+  "description": "Safe Git-backed synchronization for native AI agent configuration surfaces",
   "type": "module",
   "bin": {
     "agent-man": "./dist/src/cli.js"
@@ -14,6 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node scripts/run-tests.mjs",
+    "test:grok": "npm run build && node scripts/check-grok.mjs",
     "format": "prettier --write . && tsc -p tsconfig.json --noEmit",
     "format:check": "prettier --check . && tsc -p tsconfig.json --noEmit",
     "install:check": "node scripts/check-install.mjs",
@@ -36,12 +37,17 @@
     "cli",
     "configuration",
     "git",
-    "grok"
+    "grok",
+    "skills"
   ],
+  "license": "MIT",
   "engines": {
     "node": ">=22"
   },
   "packageManager": "npm@11.13.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "prettier": "^3.9.6",

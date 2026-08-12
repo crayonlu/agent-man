@@ -1,0 +1,183 @@
+# agent-man design
+
+## Project definition
+
+agent-man is a profile-driven manager for portable, native AI agent configuration surfaces. A
+surface is smaller than a harness home directory: it contains only files with documented cross-device
+meaning and excludes identity, runtime state, machine trust, downloaded artifacts, and project-owned
+configuration.
+
+This definition is the primary boundary. agent-man is not:
+
+- a configuration converter;
+- a general dotfiles manager;
+- a Git wrapper for arbitrary paths;
+- a symlink farm from HOME into a checkout; or
+- a service that replaces GitHub/Git transport.
+
+## Minimal state model
+
+There are three states, following the useful distinction made by tools such as chezmoi without
+adopting their template system:
+
+- **native** — the actual files consumed by the harness;
+- **stored** — the validated profile files in the private Git worktree;
+- **upstream** — ordinary Git history on the configured remote.
+
+Native state is the source of local edits. Stored state is the merge boundary. A clean merged stored
+state is applied to native state only after validation and backup. No fourth configuration database
+exists. The lock, backup manifests, and short-lived apply journal are operational recovery metadata,
+never an alternate source of configuration truth.
+
+## Why GitHub Template is initialization, not synchronization
+
+GitHub creates a repository from a template with an independent history. Later template changes do
+not propagate into repositories already created from it. Therefore the template owns only safe birth
+defaults: root deny rules, line-ending attributes, and explanatory README content. Git commits and
+merges—not the template relationship—are the synchronization protocol.
+
+agent-man seeds missing control files for empty/custom remotes but never treats the public template
+as an update channel for private configuration repositories.
+
+## Profile contract
+
+A built-in profile must declare:
+
+1. A documented native root and any official environment override.
+2. An exact allowlist of portable files and directories.
+3. A risk label for every allowlisted path: `configuration` or `active`.
+4. Targeted validators where a native format can embed credentials.
+5. An official non-mutating verification command when one exists.
+6. Tests for exclusions, remote apply, deletion, path limits, links, and failure rollback.
+
+A new profile is rejected when its proposed root mixes portable configuration with credentials or
+runtime state and no stable allowlist can separate them. Supporting “everything under `~/.tool`” is
+not generality; it is an unauditable security boundary.
+
+The current profiles are intentionally small:
+
+- xAI documents `GROK_HOME`, user `config.toml`, `sandbox.toml`, user skills, and personal hooks.
+  Plugins/marketplace installations and trust state have different lifecycle/security semantics and
+  are not included.
+- Multiple harnesses document the open `~/.agents/skills` convention, and Grok also documents
+  `~/.agents/commands`. Those assets are native at that location; no conversion occurs.
+
+## Allowlist and ignore invariants
+
+The compiled profile allowlist is authoritative. Git ignore files are user-editable subtraction:
+
+```text
+effective surface = built-in allowlist − ignored paths
+```
+
+There is no operation that adds an arbitrary path. Force-tracked paths outside a profile fail full
+repository validation before commit, apply, or push. Newly ignored tracked paths are removed only
+from agent-man's internal worktree/index; live native files remain on disk and remote deletions under
+the new ignore rule remain local.
+
+## Symbolic-link model
+
+Git stores a symlink as mode `120000` with the link text in a blob. It does not store the target's
+contents. agent-man adopts that exact model.
+
+| Link form                                                      | Capture              | Apply                    | Reason                                       |
+| -------------------------------------------------------------- | -------------------- | ------------------------ | -------------------------------------------- |
+| Surface root symlink                                           | Resolve once         | Operate on resolved root | The user explicitly selected this trust root |
+| Nested internal relative link with existing allowlisted target | Store link text/mode | Recreate link            | Portable native structure                    |
+| Absolute link                                                  | Local binding        | Protect/skip             | Encodes one device's path                    |
+| Relative link escaping the surface                             | Local binding        | Protect/skip             | Would cross the management boundary          |
+| Broken or out-of-profile link                                  | Local binding        | Protect/skip             | Target cannot be reproduced safely           |
+| Unsafe link committed to stored Git state                      | Reject               | Never apply              | A remote must not define local escape paths  |
+
+Directory walking uses `lstat` semantics and never descends through a nested link. Target-chain
+validation reads link text/metadata only. Before every copy, removal, or comparison, each existing
+ancestor below the resolved surface root is checked again for symlinks. Leaf replacement is atomic
+where the operating system permits it.
+
+The same resolver runs against fetched Git tree entries without consulting the checkout. A stored
+link that is internally reproducible in Git is still refused on apply if its target chain would pass
+through an external device-local binding.
+
+Git index mode remains authoritative when Windows or `core.symlinks=false` materializes a link as a
+small regular file. If the OS cannot create a real link, agent-man fails instead of silently changing
+its meaning.
+
+## Transaction and conflict invariants
+
+The synchronization order is fixed:
+
+```text
+capture → scoped stage → validate → commit → fetch → object-tree preflight
+        → merge → validate → snapshot + journal → apply (or rollback) → push
+```
+
+- Merge conflicts occur only in the private stored worktree; live native files are untouched.
+- Every affected live leaf and every “previously absent” destination is represented in one backup
+  manifest before apply begins.
+- The backup id is durably journaled before the first mutation. A later mutating command replays that
+  backup when the prior process died before clearing the journal.
+- Deletions execute before copies so Git type changes such as symlink-to-directory are reproducible.
+- Any apply error restores the manifest. A rollback error is surfaced separately and preserves the
+  backup for manual recovery.
+- A push happens after a coherent local apply. A non-fast-forward push failure does not corrupt
+  native/stored agreement; the next sync fetches and retries normally.
+- Locks include PID, host, and timestamp. Only a dead same-host lock is automatically reclaimed.
+
+## Repository and filesystem validation
+
+Validation is performed before both capture commits and merged-tree apply:
+
+- only root controls and known profile paths may be tracked;
+- only regular files and mode-`120000` symlinks are accepted (no submodules or special files);
+- tracked paths cannot be ignored at the commit/apply boundary;
+- path depth, entry count, per-file bytes, and total bytes are bounded;
+- Windows-reserved names and control characters are rejected;
+- paths that collide after case folding or NFC normalization are rejected;
+- profile-specific secret checks never include matching values in errors; and
+- the Git worktree representation must agree with the index mode/blob.
+
+Initial clone uses `--no-checkout`, and every fetched upstream tip is first validated from
+`ls-tree` metadata and blob contents. This prevents a remote `.gitattributes` file from activating a
+locally configured filter during checkout. Only root text/EOL attributes are allowed; nested
+attributes and all filter/diff/merge/encoding macros are rejected. The private repository disables
+hooks, global attributes/excludes, fsmonitor, external diffs, and recursive submodules, and enables
+Git fetch/object integrity checking.
+
+The internal state directory is mode `0700` and lock/manifests are private on POSIX. A state path must
+be a real directory, cannot contain HOME, and is never silently chmodded when an existing custom path
+has broad permissions. A native surface root may intentionally be a symlink.
+
+## Threat model
+
+agent-man protects against accidental over-capture, unsafe repository contents, path traversal via
+nested symlinks, ordinary crashes, merge conflicts, push races, and unsupported cross-platform path
+semantics. It avoids reading external link targets and never sends file contents to an API.
+
+It cannot make intentionally managed executable content safe, detect every secret in arbitrary text,
+or defend against malware/concurrent processes already running as the same OS user. Node provides no
+portable `openat`/directory-handle API for eliminating every filesystem time-of-check/time-of-use
+race. Repository compromise still matters: skills and hooks are code and must be reviewed.
+
+## Primary references
+
+- [Git data model: symlink mode and blob representation](https://git-scm.com/docs/gitdatamodel)
+- [Git `core.symlinks`](https://git-scm.com/docs/git-config)
+- [Git ignore semantics](https://git-scm.com/docs/gitignore)
+- [Git attributes and line endings](https://git-scm.com/docs/gitattributes)
+- [Git tree object inspection](https://git-scm.com/docs/git-ls-tree)
+- [Git object integrity and hook configuration](https://git-scm.com/docs/git-config)
+- [Node.js filesystem APIs and symlink-preserving copy semantics](https://nodejs.org/api/fs.html)
+- [GitHub repositories created from templates](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template)
+- [Grok Build settings and `GROK_HOME`](https://docs.x.ai/build/settings/reference)
+- [Grok Build skills, plugins, hooks, and `~/.agents` compatibility](https://docs.x.ai/build/features/skills-plugins-marketplaces)
+- [Grok Build hook/trust locations](https://docs.x.ai/build/features/hooks)
+- [Codex Agent Skills](https://developers.openai.com/codex/skills/)
+- [Gemini CLI Agent Skills](https://geminicli.com/docs/cli/skills/)
+- [Claude Code Agent Skills](https://code.claude.com/docs/en/skills)
+- [Windows symbolic-link privilege guidance](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links)
+- [chezmoi source/target/actual state architecture](https://chezmoi.io/developer-guide/architecture/)
+
+The [CC Switch symlink security fix](https://github.com/farion1231/cc-switch/commit/6b8f36431b50385f095b5e66eb20d9c11dcaa73d)
+also provides practical evidence that configuration managers need explicit traversal checks,
+file-size bounds, and cross-platform line-ending tests; agent-man keeps those concerns inside its
+small profile/transaction core rather than adopting provider-switching or GUI scope.

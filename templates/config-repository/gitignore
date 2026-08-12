@@ -1,13 +1,9 @@
-# Operating-system noise
-.DS_Store
-Thumbs.db
+# Deny by default. agent-man creates a second allowlist .gitignore inside each enabled profile.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/.grok/
+!/.agents/
 
-# Grok Build: credentials and machine-local runtime state
-.grok/auth.json
-.grok/mcp_credentials.json
-.grok/bin/
-.grok/cache/
-.grok/crash/
-.grok/logs/
-.grok/sessions/
-.grok/tmp/
+# Add rules below to narrow synchronization further. Built-in profile allowlists cannot be widened.
