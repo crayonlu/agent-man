@@ -5,7 +5,8 @@
 agent-man is a profile-driven manager for portable, native AI agent configuration surfaces. A
 surface is smaller than a harness home directory: it contains only files with documented cross-device
 meaning and excludes identity, runtime state, machine trust, downloaded artifacts, and project-owned
-configuration.
+configuration. Each profile may additionally opt into one opaque `secrets.env` leaf whose plaintext
+is never stored; Git sees only its age ciphertext.
 
 This definition is the primary boundary. agent-man is not:
 
@@ -50,6 +51,7 @@ A built-in profile must declare:
 4. Targeted validators where a native format can embed credentials.
 5. An official non-mutating verification command when one exists.
 6. Tests for exclusions, remote apply, deletion, path limits, links, and failure rollback.
+7. An optional `native`/`stored` encrypted-secrets pair with a risk label.
 
 A new profile is rejected when its proposed root mixes portable configuration with credentials or
 runtime state and no stable allowlist can separate them. Supporting “everything under `~/.tool`” is
@@ -80,6 +82,36 @@ The current profiles are intentionally bounded, not entire home directories:
 
 These profiles can coexist in one private repository, but they remain separate native trees. There
 is no implicit cross-profile copy or format conversion.
+
+## Shared-identity encrypted secrets
+
+The secrets model deliberately adds no configuration schema or key service. Every profile declares
+the same special pair: native `secrets.env` and stored `secrets.env.age`. The ordinary portable-tree
+planner does not see the plaintext leaf. A separate module encrypts/decrypts the pair, while the
+existing apply transaction backs up, journals, atomically replaces, and rolls it back like any other
+native leaf.
+
+One X25519 age identity is shared manually across trusted devices. Its public recipient is the
+single-line root control `.age-recipient`; the private identity is resolved locally from
+`AGENT_MAN_AGE_IDENTITY_FILE`, `~/.config/age/keys.txt`, or `$AGENT_MAN_HOME/age-keys.txt` and is
+never copied into stored state. POSIX identity files must be mode `0600` and their containing
+directory private.
+
+```text
+native plaintext ──stdin──> age -e -r <recipient> ──stdout──> stored ciphertext
+stored ciphertext ──stdin──> age -d -i <identity>  ──stdout──> native plaintext
+```
+
+No temporary plaintext file is created. Command I/O is byte-preserving because an age file is
+binary. Capture first decrypts existing ciphertext with the local identity and rewrites only when
+the native bytes differ. With no stored ciphertext, a ready identity may derive the recipient and
+create `.age-recipient` in the same scoped commit. If age/identity is unavailable, the derived
+recipient mismatches the control, or ciphertext cannot be decrypted, the pair becomes a protected
+local binding: capture and apply both skip it, including deletion, while ordinary config proceeds.
+
+Fetched trees validate the control's Bech32 X25519 recipient and the structural age v1 envelope
+before checkout. Authenticity and recipient fit are established by age decryption before apply.
+Identity distribution, rotation orchestration, SOPS, KMS, and key servers remain non-goals.
 
 ## Allowlist and ignore invariants
 
@@ -128,13 +160,15 @@ its meaning.
 The synchronization order is fixed:
 
 ```text
-capture → scoped stage → validate → commit → fetch → object-tree preflight
+capture (including secrets) → scoped stage → validate → commit → fetch → object-tree preflight
         → merge → validate → snapshot + journal → apply (or rollback) → push
 ```
 
 - Merge conflicts occur only in the private stored worktree; live native files are untouched.
 - Every affected live leaf and every “previously absent” destination is represented in one backup
   manifest before apply begins.
+- A replaced native `secrets.env` is necessarily plaintext in its local rollback copy. That copy
+  remains below the mode-`0700` state directory, never enters Git, and follows normal retention.
 - The backup id is durably journaled before the first mutation. A later mutating command replays that
   backup when the prior process died before clearing the journal.
 - Deletions execute before copies so Git type changes such as symlink-to-directory are reproducible.
@@ -155,6 +189,8 @@ Validation is performed before both capture commits and merged-tree apply:
 - Windows-reserved names and control characters are rejected;
 - paths that collide after case folding or NFC normalization are rejected;
 - profile-specific secret checks never include matching values in errors; and
+- plaintext secrets paths are rejected from Git while stored ciphertext and `.age-recipient` are
+  structurally validated from both worktree and fetched blobs;
 - the Git worktree representation must agree with the index mode/blob.
 
 Initial clone uses `--no-checkout`, and every fetched upstream tip is first validated from
@@ -170,7 +206,8 @@ has broad permissions. A native surface root may intentionally be a symlink.
 
 ## Threat model
 
-agent-man protects against accidental over-capture, unsafe repository contents, path traversal via
+agent-man protects against accidental over-capture, unsafe repository contents, plaintext-secret
+tracking, path traversal via
 nested symlinks, ordinary crashes, merge conflicts, push races, and unsupported cross-platform path
 semantics. It avoids reading external link targets and never sends file contents to an API.
 
@@ -188,6 +225,8 @@ race. Repository compromise still matters: skills and hooks are code and must be
 - [Git tree object inspection](https://git-scm.com/docs/git-ls-tree)
 - [Git object integrity and hook configuration](https://git-scm.com/docs/git-config)
 - [Node.js filesystem APIs and symlink-preserving copy semantics](https://nodejs.org/api/fs.html)
+- [age CLI and shared-identity file encryption](https://github.com/FiloSottile/age)
+- [age v1 file format](https://c2sp.org/age)
 - [GitHub repositories created from templates](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template)
 - [Grok Build settings and `GROK_HOME`](https://docs.x.ai/build/settings/reference)
 - [Grok Build skills, plugins, hooks, and `~/.agents` compatibility](https://docs.x.ai/build/features/skills-plugins-marketplaces)

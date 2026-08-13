@@ -38,6 +38,17 @@ jobs:
           cache: npm
           node-version: ${{ matrix.node }}
 
+      # age is optional at runtime. Install it on POSIX so the real encrypted-secrets
+      # integration suite runs; Windows keeps the documented skip because its binary
+      # distribution and package-manager availability are not uniform on hosted images.
+      - name: Install age (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes age
+
+      - name: Install age (macOS)
+        if: runner.os == 'macOS'
+        run: brew install age
+
       - name: Install dependencies
         run: npm ci
 

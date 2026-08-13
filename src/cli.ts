@@ -47,11 +47,13 @@ Profiles:
 Semantics:
   Built-in profile allowlists define what can ever sync; .gitignore may only narrow them.
   Internal relative symlinks are preserved. Absolute, external, and broken links stay local.
-  Credentials, sessions, history, logs, caches, trust state, and unknown paths never sync.
+  Explicit secrets.env files sync only as age ciphertext; all other credentials stay local.
+  Sessions, history, logs, caches, trust state, and unknown paths never sync.
 
 Environment:
   AGENT_MAN_HOME       private local state directory (default: ~/.agent-man)
   AGENT_MAN_TEMPLATE   GitHub template repository
+  AGENT_MAN_AGE_IDENTITY_FILE  shared age identity path for encrypted secrets
 `;
 
 interface JsonEnvelope {

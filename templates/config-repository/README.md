@@ -1,11 +1,15 @@
 # Native agent configuration
 
 This private repository stores native configuration surfaces managed by
-[`agent-man`](https://github.com/crayonlu/agent-man). It is not a credential store and does not
-translate configuration between harnesses.
+[`agent-man`](https://github.com/crayonlu/agent-man). It does not translate configuration between
+harnesses.
 
 - Keep the repository private.
-- Put credentials in environment variables or an operating-system keychain.
+- Keep ordinary credentials in environment variables or an operating-system keychain. When a
+  harness must read a file, agent-man can synchronize its profile-local `secrets.env` as
+  `secrets.env.age`; only the ciphertext and `.age-recipient` public key enter Git.
+- Copy the shared age identity to each device out of band. Never commit the identity or plaintext
+  `secrets.env` file.
 - Let `agent-man` manage files through profile allowlists; `.gitignore` may narrow, never widen,
   those boundaries.
 - Do not force-push. Normal Git history and merges are the synchronization protocol.

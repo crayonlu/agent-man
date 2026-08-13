@@ -141,6 +141,15 @@ export function objectText(
   return runner("git", ["cat-file", "blob", objectId], { cwd: repository }).stdout;
 }
 
+export function objectBytes(
+  repository: string,
+  objectId: string,
+  runner: CommandRunner = runCommand,
+): Buffer {
+  const result = runner("git", ["cat-file", "blob", objectId], { cwd: repository });
+  return result.stdoutBytes ?? Buffer.from(result.stdout, "utf8");
+}
+
 export function trackedPaths(
   repository: string,
   repositoryDirectory: string,

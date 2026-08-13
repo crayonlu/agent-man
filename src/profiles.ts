@@ -23,6 +23,12 @@ export interface PortableFilePattern {
   readonly scanForSecrets?: boolean;
 }
 
+export interface SecretsFile {
+  readonly native: string;
+  readonly risk: EntryRisk;
+  readonly stored: string;
+}
+
 export interface NativeProfile {
   readonly description: string;
   readonly displayName: string;
@@ -36,11 +42,18 @@ export interface NativeProfile {
   readonly portableFiles: readonly PortableFile[];
   readonly portableFilePatterns?: readonly PortableFilePattern[];
   readonly repositoryDirectory: string;
+  readonly secretsFile?: SecretsFile;
   readonly verificationCommand?: {
     readonly arguments: readonly string[];
     readonly command: string;
   };
 }
+
+const DEFAULT_SECRETS_FILE: SecretsFile = {
+  native: "secrets.env",
+  risk: "configuration",
+  stored: "secrets.env.age",
+};
 
 const GROK_PROFILE: NativeProfile = {
   description:
@@ -61,6 +74,7 @@ const GROK_PROFILE: NativeProfile = {
     { relativePath: "AGENTS.md", risk: "active" },
   ],
   repositoryDirectory: ".grok",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["inspect"], command: "grok" },
 };
 
@@ -86,6 +100,7 @@ const CLAUDE_CODE_PROFILE: NativeProfile = {
     { relativePath: "settings.json", risk: "active", scanForSecrets: true },
   ],
   repositoryDirectory: ".claude-code",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["--version"], command: "claude" },
 };
 
@@ -104,6 +119,7 @@ const CODEX_PROFILE: NativeProfile = {
   ],
   portableFilePatterns: [{ glob: "*.config.toml", risk: "active", scanForSecrets: true }],
   repositoryDirectory: ".codex",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["--version"], command: "codex" },
 };
 
@@ -128,6 +144,7 @@ const OPENCODE_PROFILE: NativeProfile = {
     { relativePath: "tui.json", risk: "configuration" },
   ],
   repositoryDirectory: ".opencode",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["--version"], command: "opencode" },
 };
 
@@ -146,6 +163,7 @@ const PI_PROFILE: NativeProfile = {
   ],
   portableFiles: [{ relativePath: "settings.json", risk: "active", scanForSecrets: true }],
   repositoryDirectory: ".pi-agent",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["--version"], command: "pi" },
 };
 
@@ -169,6 +187,7 @@ const GEMINI_CLI_PROFILE: NativeProfile = {
     { relativePath: "settings.json", risk: "active", scanForSecrets: true },
   ],
   repositoryDirectory: ".gemini",
+  secretsFile: DEFAULT_SECRETS_FILE,
   verificationCommand: { arguments: ["--version"], command: "gemini" },
 };
 
@@ -182,6 +201,7 @@ const AGENT_SKILLS_PROFILE: NativeProfile = {
   ],
   portableFiles: [],
   repositoryDirectory: ".agents",
+  secretsFile: DEFAULT_SECRETS_FILE,
 };
 
 export const NATIVE_PROFILES: readonly NativeProfile[] = [
@@ -250,6 +270,9 @@ export function isPortableFile(profile: NativeProfile, relativePath: string): bo
 
 export function riskForPath(profile: NativeProfile, relativePath: string): EntryRisk | undefined {
   const candidate = normalized(relativePath);
+  if (candidate === profile.secretsFile?.stored) {
+    return profile.secretsFile.risk;
+  }
   const file = profile.portableFiles.find((entry) => entry.relativePath === candidate);
   if (file !== undefined) {
     return file.risk;
@@ -267,6 +290,14 @@ export function riskForPath(profile: NativeProfile, relativePath: string): Entry
 
 export function isPortablePath(profile: NativeProfile, relativePath: string): boolean {
   return riskForPath(profile, relativePath) !== undefined;
+}
+
+export function isNativeSecretsPath(profile: NativeProfile, relativePath: string): boolean {
+  return normalized(relativePath) === profile.secretsFile?.native;
+}
+
+export function isStoredSecretsPath(profile: NativeProfile, relativePath: string): boolean {
+  return normalized(relativePath) === profile.secretsFile?.stored;
 }
 
 export function shouldScanForSecrets(profile: NativeProfile, relativePath: string): boolean {
@@ -297,6 +328,9 @@ export function profileIgnoreContents(profile: NativeProfile): string {
   }
   for (const directory of profile.portableDirectories) {
     lines.push(`!${directory.relativePath}/`, `!${directory.relativePath}/**`);
+  }
+  if (profile.secretsFile !== undefined) {
+    lines.push(`!${profile.secretsFile.stored}`);
   }
   lines.push("**/.DS_Store", "**/Thumbs.db");
   return `${lines.join("\n")}\n`;

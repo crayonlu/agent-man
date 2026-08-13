@@ -2,6 +2,7 @@
 /*
 !/.gitignore
 !/.gitattributes
+!/.age-recipient
 !/README.md
 !/.grok/
 !/.claude-code/

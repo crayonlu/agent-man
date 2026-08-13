@@ -57,6 +57,14 @@ import {
   validateRepositoryScope,
 } from "./repository.js";
 import {
+  ageToolsAvailable,
+  deriveAgeRecipient,
+  inspectSecretPair,
+  readAgeRecipient,
+  resolveAgeIdentity,
+  secretPairActive,
+} from "./secrets.js";
+import {
   SkillInstallResult,
   SkillInstallTarget,
   installSkill,
@@ -129,6 +137,7 @@ export interface PlanReport {
     readonly changes: readonly PlanChange[];
     readonly liveDirectory: string;
     readonly name: string;
+    readonly protectedSecrets: ProfileState["protectedSecrets"];
   }[];
   readonly repositoryChanges: readonly RepositoryPlanChange[];
   readonly remoteChanges: readonly RemotePlanChange[];
@@ -250,7 +259,7 @@ function applyExistingProfiles(context: CommandContext): ProfileApplyResult[] {
   const result = applyProfiles(context.paths, profiles, [], environmentFor(context), runner);
   for (const profile of result.profiles) {
     context.output.info(
-      `Applied ${profile.name}: ${profile.copied} copied, ${profile.deleted} deleted, ${profile.protectedBindings} local binding(s) protected.`,
+      `Applied ${profile.name}: ${profile.copied} copied, ${profile.deleted} deleted, ${profile.protectedBindings} local binding(s) and ${profile.protectedSecrets} secret(s) protected.`,
     );
   }
   if (result.backup !== undefined) {
@@ -404,6 +413,8 @@ function addProfileLocked(name: string, context: CommandContext): AddReport {
     );
   }
   let profileStaged = false;
+  const recipientPath = `${context.paths.repositoryDirectory}/.age-recipient`;
+  const recipientExistedBefore = managedPathExists(recipientPath);
   let changes: ReturnType<typeof captureProfile>;
   try {
     changes = captureProfile(context.paths, profile, environment, runner);
@@ -420,6 +431,9 @@ function addProfileLocked(name: string, context: CommandContext): AddReport {
       }
     }
     rmSync(repositoryProfileDirectory, { force: true, recursive: true });
+    if (!recipientExistedBefore) {
+      rmSync(recipientPath, { force: true });
+    }
     if (rollbackError !== undefined) {
       throw new AppError(
         `Profile add failed (${errorMessage(error)}) and its Git index rollback also failed (${errorMessage(rollbackError)}). Inspect the private repository before retrying.`,
@@ -495,6 +509,9 @@ export function showStatus(context: CommandContext): StatusReport {
     }
     for (const binding of profile.bindings) {
       context.output.info(`  = [local binding: ${binding.reason}] ${binding.relativePath}`);
+    }
+    for (const secret of profile.protectedSecrets) {
+      context.output.info(`  = [protected secret: ${secret.reason}] ${secret.relativePath}`);
     }
   }
   for (const profile of report.unmanagedProfiles) {
@@ -598,6 +615,7 @@ export function showPlan(context: CommandContext): PlanReport {
         })),
         liveDirectory: profile.liveDirectory,
         name: profile.name,
+        protectedSecrets: profile.protectedSecrets,
       })),
       repositoryChanges: repositoryPlanChanges(repository, runner),
       remoteChanges: remotePlanChanges(repository, runner),
@@ -613,6 +631,9 @@ export function showPlan(context: CommandContext): PlanReport {
       }
       for (const binding of profile.bindings) {
         context.output.info(`  protect-local-binding [${binding.reason}] ${binding.relativePath}`);
+      }
+      for (const secret of profile.protectedSecrets) {
+        context.output.info(`  protect-secret [${secret.reason}] ${secret.relativePath}`);
       }
     }
     context.output.info(
@@ -787,6 +808,116 @@ function diagnoseProfile(
   }
 }
 
+function diagnoseSecrets(
+  context: CommandContext,
+  diagnostics: Diagnostic[],
+  profiles: readonly NativeProfile[],
+  runner: CommandRunner,
+  environment: NodeJS.ProcessEnv,
+): void {
+  const available = ageToolsAvailable(environment);
+  diagnostic(
+    diagnostics,
+    "SECRETS_AGE_AVAILABLE",
+    available ? "ok" : "warning",
+    available
+      ? "age and age-keygen are available."
+      : "age or age-keygen is unavailable; active secrets remain protected and unsynchronized.",
+  );
+  const active: NativeProfile[] = [];
+  for (const profile of profiles) {
+    try {
+      if (secretPairActive(context.paths, profile, environment, runner)) {
+        active.push(profile);
+      }
+    } catch (error) {
+      diagnostic(diagnostics, errorCode(error), "error", errorMessage(error), profile.name);
+    }
+  }
+  for (const profile of NATIVE_PROFILES) {
+    if (active.some((candidate) => candidate.name === profile.name)) {
+      continue;
+    }
+    try {
+      if (secretPairActive(context.paths, profile, environment, runner)) {
+        active.push(profile);
+      }
+    } catch (error) {
+      diagnostic(diagnostics, errorCode(error), "error", errorMessage(error), profile.name);
+    }
+  }
+  if (active.length === 0) {
+    return;
+  }
+  let recipient: string | undefined;
+  try {
+    recipient = readAgeRecipient(context.paths.repositoryDirectory);
+  } catch (error) {
+    diagnostic(diagnostics, errorCode(error), "error", errorMessage(error));
+    return;
+  }
+  if (recipient === undefined) {
+    diagnostic(
+      diagnostics,
+      "SECRETS_RECIPIENT_MISSING",
+      "warning",
+      "The shared recipient control is missing; capture will derive it from the local identity.",
+    );
+  }
+  let identity: ReturnType<typeof resolveAgeIdentity>;
+  try {
+    identity = resolveAgeIdentity(context.paths, environment);
+  } catch (error) {
+    diagnostic(diagnostics, errorCode(error), "error", errorMessage(error));
+    return;
+  }
+  if (identity.kind === "missing") {
+    diagnostic(
+      diagnostics,
+      "SECRETS_IDENTITY_MISSING",
+      "warning",
+      "No local shared age identity was found; active secrets remain protected.",
+    );
+    return;
+  }
+  if (!available) {
+    return;
+  }
+  let derived: string;
+  try {
+    derived = deriveAgeRecipient(identity.path, environment, runner);
+  } catch {
+    diagnostic(
+      diagnostics,
+      "SECRETS_RECIPIENT_MISMATCH",
+      "error",
+      "The local age identity is invalid or cannot provide the configured shared recipient.",
+    );
+    return;
+  }
+  if (recipient !== undefined && recipient !== derived) {
+    diagnostic(
+      diagnostics,
+      "SECRETS_RECIPIENT_MISMATCH",
+      "error",
+      "The local age identity does not match the repository shared recipient.",
+    );
+    return;
+  }
+  for (const profile of active) {
+    const state = inspectSecretPair(context.paths, profile, environment, runner);
+    if (state.protectedReason === "decrypt-failed") {
+      diagnostic(
+        diagnostics,
+        "SECRETS_RECIPIENT_MISMATCH",
+        "error",
+        "The stored secrets file cannot be decrypted by the configured shared identity.",
+        profile.name,
+      );
+    }
+  }
+}
+
 export function doctor(context: CommandContext): DoctorReport {
   const diagnostics: Diagnostic[] = [];
   const runner = runnerFor(context);
@@ -873,6 +1004,7 @@ export function doctor(context: CommandContext): DoctorReport {
       );
       diagnoseRemote(context, diagnostics, runner, environment);
       const profiles = activeProfiles(context.paths.repositoryDirectory, runner);
+      diagnoseSecrets(context, diagnostics, profiles, runner, environment);
       if (profiles.length === 0) {
         diagnostic(
           diagnostics,
@@ -928,7 +1060,7 @@ function profilesForApply(
 function reportApply(context: CommandContext, result: ReturnType<typeof applyProfiles>): void {
   for (const profile of result.profiles) {
     context.output.info(
-      `${profile.name}: ${profile.copied} applied, ${profile.deleted} deleted, ${profile.protectedBindings} local binding(s) protected.`,
+      `${profile.name}: ${profile.copied} applied, ${profile.deleted} deleted, ${profile.protectedBindings} local binding(s) and ${profile.protectedSecrets} secret(s) protected.`,
     );
   }
   if (result.backup !== undefined) {
@@ -1074,7 +1206,9 @@ export function listProfiles(context: CommandContext): readonly NativeProfile[] 
     context.output.info(
       `  native root: ${liveDirectoryFor(profile, context.paths, environmentFor(context))}`,
     );
-    context.output.info(`  allowlist: ${[...files, ...directories].join(", ")}`);
+    const storedSecret =
+      profile.secretsFile === undefined ? [] : [`${profile.secretsFile.stored} (encrypted)`];
+    context.output.info(`  allowlist: ${[...files, ...directories, ...storedSecret].join(", ")}`);
   }
   return NATIVE_PROFILES;
 }

@@ -22,7 +22,15 @@ import {
   writeBufferAtomic,
 } from "./files.js";
 import { AppPaths } from "./paths.js";
-import { EntryRisk, findNativeProfile, isPortablePath, liveDirectoryFor } from "./profiles.js";
+import {
+  EntryRisk,
+  findNativeProfile,
+  isNativeSecretsPath,
+  isPortablePath,
+  isStoredSecretsPath,
+  liveDirectoryFor,
+} from "./profiles.js";
+import { nativeSecretEntry } from "./secrets.js";
 
 const BACKUP_VERSION = 1;
 const BACKUP_RETENTION = 10;
@@ -503,7 +511,11 @@ function validateManifestEntry(entry: BackupManifestEntry): void {
     );
   }
   validatePortableRelativePath(entry.relativePath);
-  if (!isPortablePath(profile, entry.relativePath)) {
+  if (
+    (!isPortablePath(profile, entry.relativePath) &&
+      !isNativeSecretsPath(profile, entry.relativePath)) ||
+    isStoredSecretsPath(profile, entry.relativePath)
+  ) {
     throw new AppError(
       `Backup entry '${entry.profile}/${entry.relativePath}' is outside the current profile allowlist.`,
       "BACKUP_INVALID",
@@ -660,11 +672,17 @@ function currentReferencesForRestore(
         "LOCAL_BINDING_PROTECTED",
       );
     }
-    const affected = scan.entries.filter(
-      (entry) =>
-        entry.relativePath === desired.relativePath ||
-        entry.relativePath.startsWith(`${desired.relativePath}/`),
-    );
+    const secretEntry = isNativeSecretsPath(profile, desired.relativePath)
+      ? nativeSecretEntry(scan.root, profile)
+      : undefined;
+    const affected =
+      secretEntry === undefined
+        ? scan.entries.filter(
+            (entry) =>
+              entry.relativePath === desired.relativePath ||
+              entry.relativePath.startsWith(`${desired.relativePath}/`),
+          )
+        : [secretEntry];
     const exact = affected.some((entry) => entry.relativePath === desired.relativePath);
     if (!exact) {
       references.push({

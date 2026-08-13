@@ -1,6 +1,6 @@
 ---
 name: agent-man
-description: Install, inspect, plan, synchronize, back up, and restore selected native AI harness configuration surfaces with agent-man and Git. Use when asked to keep Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok Build, or shared Agent Skills consistent across devices. Do not use for cross-harness conversion, arbitrary dotfiles, project-local configuration, credentials, sessions, history, logs, caches, trust state, or provider switching.
+description: Install, inspect, plan, synchronize, back up, and restore selected native AI harness configuration surfaces and explicitly opted-in age-encrypted secrets with agent-man and Git. Use when asked to keep Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok Build, or shared Agent Skills consistent across devices. Do not use for cross-harness conversion, arbitrary dotfiles, project-local configuration, harness authentication, sessions, history, logs, caches, trust state, key distribution, or provider switching.
 ---
 
 # Agent Man
@@ -23,13 +23,22 @@ native files and never invents a shared schema or translates between harnesses.
 - Keep the Git repository private. GitHub is transport and history, not a secret manager. Use
   environment-variable references, `env_key`, or `bearer_token_env_var`; never request or print a
   token.
+- The only supported secret pair is native `secrets.env` to stored `secrets.env.age`, guarded by one
+  root `.age-recipient`. Never open, print, summarize, or stage plaintext. Before enabling it, check
+  `age --version`, `age-keygen --version`, identity permissions, `doctor --json`, and `plan --json`.
+  Treat missing/wrong identities as protected local state; do not bypass that protection.
+- All devices must receive the same age identity through a user-approved out-of-band copy. Never
+  put the identity in Git or move it through chat. agent-man does not distribute or rotate keys.
+- Local rollback backups can contain the prior plaintext `secrets.env`. Treat `AGENT_MAN_HOME` as
+  sensitive local state; never inspect, copy, or publish backup contents.
 - Do not force-push, auto-resolve a conflict, stage arbitrary files in the internal repository, or
   claim success until `agent-man sync --json` succeeds and `agent-man status --json` is clean.
 
 ## Install the CLI
 
 First check `node --version`, `git --version`, `agent-man --version`, and, for the default GitHub
-flow, `gh auth status`. Node.js 22 or newer is required.
+flow, `gh auth status`. Check `age --version` and `age-keygen --version` when encrypted secrets are
+requested. Node.js 22 or newer is required.
 
 If the CLI is absent, ask before installing global software, then install directly from the official
 GitHub repository:
@@ -74,7 +83,9 @@ agent-man init --remote <git-url>
 ```
 
 On an additional device, `init` validates and transactionally applies already tracked profiles. Do
-not run `add` for a profile already present in the cloned repository.
+not run `add` for a profile already present in the cloned repository. For encrypted secrets, have
+the user copy the shared identity into `~/.config/age/keys.txt` (private directory, file mode `0600`)
+or set `AGENT_MAN_AGE_IDENTITY_FILE` before `sync`. Do not perform or improvise key transport.
 
 ## Enable a native profile
 
@@ -111,7 +122,8 @@ agent-man status --json
 
 Stop if `doctor` returns an error, if any of the plan's three path groups contains an unexpected
 path, or if an `active` change was not requested. Local bindings reported as warnings are protected,
-not failures.
+not failures. A protected secret is also a deliberate skip: do not delete, overwrite, or re-encrypt
+it until identity diagnostics are resolved.
 
 ## Routine synchronization
 

@@ -8,6 +8,7 @@ The project stays small by giving existing tools one job each:
 
 - GitHub Template gives a new private configuration repository safe defaults.
 - Git provides history, text merges, transport, and ignore matching.
+- age encrypts the one explicitly opted-in secrets file per profile.
 - agent-man defines portable profile boundaries, validates them, and applies changes transactionally.
 
 There is no database, daemon, web service, GitHub SDK, background process, normalized configuration
@@ -26,9 +27,10 @@ schema, or force-push protocol. The architectural invariants and research behind
 | `gemini-cli`   | `$GEMINI_CLI_HOME/.gemini` or `~/.gemini`           | settings/context, keybindings, agents, policies, skills, commands             |
 | `agent-skills` | `~/.agents`                                         | `skills/`, `commands/`                                                        |
 
-Unknown paths are unmanaged even if a `.gitignore` negation tries to include them. Credentials,
+Unknown paths are unmanaged even if a `.gitignore` negation tries to include them. Harness-managed credentials,
 sessions, history, memory, logs, caches, crash data, trust decisions, downloaded packages, plugins,
-and project-local configuration never enter the portable surface. A profile is a native copy: agent-
+and project-local configuration never enter the portable surface. The sole exception is the explicit
+`secrets.env` pair described below: only its age ciphertext enters Git. A profile is a native copy: agent-
 man does not translate a Claude skill into a Codex skill or mirror one profile into another.
 
 Enable only the surfaces you actually use. `agent-man profiles --json` is the authoritative list of
@@ -42,6 +44,7 @@ roots and allowlists. OpenCode follows the documented XDG layout, so `XDG_CONFIG
 - Node.js 22 or newer
 - Git
 - [GitHub CLI](https://cli.github.com/) authenticated with `gh auth login` for the default flow
+- [age](https://github.com/FiloSottile/age) only when using encrypted secrets sync
 
 Install the CLI directly from the official GitHub repository:
 
@@ -126,6 +129,17 @@ agent-man doctor
 agent-man status
 ```
 
+If encrypted secrets are enabled, copy the same identity file from a trusted existing device before
+the first sync; do not send it through Git, chat, or email:
+
+```bash
+mkdir -p ~/.config/age
+chmod 700 ~/.config/age
+# Copy keys.txt out-of-band from the first device, then:
+chmod 600 ~/.config/age/keys.txt
+agent-man sync
+```
+
 The cloned Git index is fully validated before tracked profiles are applied. Existing native files
 are backed up in one transaction; unknown and device-local paths are left alone. Clone uses
 `--no-checkout`: agent-man validates the fetched Git tree directly from the object database before
@@ -160,6 +174,47 @@ label; an unsafe remote tree fails the plan before checkout or merge.
    is retried on the next sync.
 
 No command force-pushes or uses last-writer-wins replacement.
+
+## Encrypted secrets sync
+
+Each native profile has one deliberately narrow secret pair:
+
+```text
+native:  secrets.env       # plaintext; configure the harness to read it if desired
+stored:  secrets.env.age   # age ciphertext; the only form Git may track
+control: .age-recipient    # one shared public recipient at repository root
+```
+
+All devices share one age identity. Generate it once on the first device, keep the identity file
+mode `0600` inside a private directory, and copy that same file to additional devices through a
+trusted out-of-band channel:
+
+```bash
+mkdir -p ~/.config/age && chmod 700 ~/.config/age
+age-keygen -o ~/.config/age/keys.txt
+chmod 600 ~/.config/age/keys.txt
+
+agent-man add codex
+${EDITOR:-vi} ~/.codex/secrets.env
+agent-man doctor
+agent-man plan
+agent-man sync
+```
+
+The first capture derives the public recipient and writes `.age-recipient`; plaintext travels to
+`age` only over stdin and ciphertext returns over stdout. Later captures decrypt the stored file and
+rewrite it only when its plaintext differs. Apply decrypts into memory and atomically writes the
+native file under the same backup/journal/rollback transaction as ordinary configuration.
+
+Identity lookup is `AGENT_MAN_AGE_IDENTITY_FILE`, then `~/.config/age/keys.txt`, then
+`$AGENT_MAN_HOME/age-keys.txt`. If age is unavailable, the identity is absent/wrong, or decryption
+fails, secrets are reported as protected and neither uploaded, overwritten, nor deleted; ordinary
+configuration can still sync. `doctor` reports missing tools or identity as warnings and unsafe
+permissions or a recipient mismatch as errors. The CLI never prints plaintext, private keys, or
+recipient values.
+
+agent-man does not parse `secrets.env` or configure a harness to read it. SOPS, KMS, key servers,
+automatic rotation, and identity distribution are intentionally outside the project.
 
 ## Narrow a profile with `.gitignore`
 
@@ -221,6 +276,10 @@ recoverable; `sync`, `restore`, `add`, and `init` restore the pre-apply backup b
 Restore creates a fresh pre-restore safety backup and changes the native surface, not Git history;
 the following plan shows what a later sync would capture.
 
+When an apply replaces `secrets.env`, its rollback copy is plaintext because rollback must reproduce
+the prior native file. It stays only under the private local backup directory, never in Git, and is
+subject to the same ten-point retention policy. Protect `AGENT_MAN_HOME` like the native secret.
+
 Local state is private on POSIX systems:
 
 ```text
@@ -238,6 +297,8 @@ instead of silently changing permissions on a broad path.
 ## Security model
 
 - Keep the configuration repository private. GitHub is not a credential manager.
+- A tracked `secrets.env.age` is ciphertext, but repository readers can still see filenames and
+  history. Keep the shared age identity outside Git and distribute it manually.
 - Native config files that support credential-bearing fields receive targeted checks for inline API
   keys, authorization headers, and secret-like assignments. Prefer `env_key`,
   `bearer_token_env_var`, and `${VAR}` references; never commit a token.
@@ -260,6 +321,7 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 - Converting Claude, Codex, Gemini, Grok, or any other harness configuration into another format
 - Mirroring an entire harness home directory or accepting arbitrary directory flags
 - Synchronizing authentication, sessions, history, memory, trust state, logs, cache, or usage data
+- Distributing or rotating the shared age identity; integrating SOPS, KMS, or a key service
 - Managing project-local configuration already owned by a project's Git repository
 - Installing plugins, switching providers, proxying APIs, or tracking usage
 - Background synchronization, a web UI, or conflict auto-resolution
@@ -282,5 +344,7 @@ directories and skips cleanly when Grok Build is unavailable. Real Pi, Claude Co
 Gemini CLI, and Grok installations are exercised only by the GitHub Actions `harnesses` workflow,
 never by the developer's machine or the normal local suite.
 
-CI runs Node.js 22 and 24 on Linux, macOS, and Windows. The project has zero runtime dependencies and
-is licensed under the [MIT License](LICENSE).
+CI runs Node.js 22 and 24 on Linux, macOS, and Windows. Linux and macOS install age for the real
+secrets suite; Windows skips those cases because hosted-runner age distribution is not uniform. The
+project has zero JavaScript runtime dependencies; its external tools are Git, optional GitHub CLI,
+and optional age. It is licensed under the [MIT License](LICENSE).

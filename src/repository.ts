@@ -37,6 +37,7 @@ import {
   GitTreeEntry,
   ignoredPaths,
   indexFileText,
+  objectBytes,
   objectText,
   stagePaths,
   trackedEntries,
@@ -50,14 +51,32 @@ import {
   NativeProfile,
   isPortableFile,
   isPortablePath,
+  isNativeSecretsPath,
+  isStoredSecretsPath,
   liveDirectoryFor,
   profileIgnoreContents,
   riskForPath,
   shouldScanForSecrets,
 } from "./profiles.js";
 import { CommandRunner, runCommand } from "./process.js";
+import {
+  AGE_RECIPIENT_PATH,
+  SecretApplyAction,
+  SecretProtectionReason,
+  captureSecretPair,
+  executeSecretActions,
+  inspectSecretPair,
+  parseAgeRecipient,
+  planSecretApply,
+  validateAgeCiphertext,
+} from "./secrets.js";
 
-const ROOT_CONTROL_PATHS: readonly string[] = [".gitattributes", ".gitignore", "README.md"];
+const ROOT_CONTROL_PATHS: readonly string[] = [
+  ".gitattributes",
+  ".gitignore",
+  AGE_RECIPIENT_PATH,
+  "README.md",
+];
 const PROFILE_CONTROL_PATH = ".gitignore";
 
 export interface RepositoryPathClassification {
@@ -79,6 +98,10 @@ export interface ProfileState {
   readonly liveDirectory: string;
   readonly managedEntries: number;
   readonly name: string;
+  readonly protectedSecrets: readonly {
+    readonly reason: SecretProtectionReason;
+    readonly relativePath: string;
+  }[];
   readonly totalBytes: number;
 }
 
@@ -87,6 +110,7 @@ export interface ProfileApplyResult {
   readonly deleted: number;
   readonly name: string;
   readonly protectedBindings: number;
+  readonly protectedSecrets: number;
 }
 
 export interface ApplyResult {
@@ -329,6 +353,36 @@ function validateTrackedEntry(
     );
     return undefined;
   }
+  if (isNativeSecretsPath(profile, relativePath)) {
+    throw new AppError(
+      `Refusing tracked plaintext secrets path '${tracked.path}'; only the encrypted stored path may enter Git.`,
+      "INLINE_SECRET",
+    );
+  }
+  if (isStoredSecretsPath(profile, relativePath)) {
+    if (tracked.kind !== "file" || tracked.mode !== "100644") {
+      throw new AppError(
+        `Encrypted secrets file '${tracked.path}' must be a non-executable regular file.`,
+        "SECRETS_CIPHERTEXT_INVALID",
+      );
+    }
+    const worktreePath = pathInside(repositoryRoot, relativePath);
+    if (!managedPathExists(worktreePath)) {
+      throw new AppError(
+        `Encrypted secrets file '${tracked.path}' is missing or has changed type in the Git worktree.`,
+        "SECRETS_CIPHERTEXT_INVALID",
+      );
+    }
+    const stat = lstatSync(worktreePath);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new AppError(
+        `Encrypted secrets file '${tracked.path}' is missing or has changed type in the Git worktree.`,
+        "SECRETS_CIPHERTEXT_INVALID",
+      );
+    }
+    validateAgeCiphertext(readManagedFile(repositoryRoot, relativePath), tracked.path);
+    return undefined;
+  }
   if (!isPortablePath(profile, relativePath)) {
     throw new AppError(
       `Tracked path '${tracked.path}' is outside the '${profile.name}' allowlist.`,
@@ -450,7 +504,12 @@ function repositoryTree(
     );
   }
   const visibleEntries = filteredEntries(repository, profile, scan.entries, runner);
-  const map = new Map(visibleEntries.map((entry) => [entry.relativePath, entry]));
+  const scanned = new Map(visibleEntries.map((entry) => [entry.relativePath, entry]));
+  const map = new Map(
+    visibleEntries
+      .filter((entry) => !isStoredSecretsPath(profile, entry.relativePath))
+      .map((entry) => [entry.relativePath, entry]),
+  );
   const ignored = ignoredPaths(
     repository,
     tracked.map((entry) => entry.path),
@@ -466,7 +525,7 @@ function repositoryTree(
       scan.root,
       profile,
       trackedEntry,
-      map,
+      scanned,
       index,
       runner,
     );
@@ -564,6 +623,7 @@ export function validateRepositoryControls(
     if (
       stat.isSymbolicLink() ||
       !stat.isFile() ||
+      (stat.mode & 0o111) !== 0 ||
       (entry !== undefined &&
         (entry.kind !== "file" || entry.mode !== "100644" || entry.stage !== 0))
     ) {
@@ -575,6 +635,8 @@ export function validateRepositoryControls(
     const contents = readManagedFile(repositoryRoot, path).toString("utf8");
     if (path === ".gitattributes") {
       validateGitAttributes(contents, path);
+    } else if (path === AGE_RECIPIENT_PATH) {
+      parseAgeRecipient(contents);
     } else {
       validatePortableText(contents, path, "REPOSITORY_CONTROL_UNSAFE");
     }
@@ -607,6 +669,24 @@ function treeObjectText(
   return contents;
 }
 
+function treeObjectBytes(
+  repository: string,
+  entry: GitTreeEntry,
+  cache: Map<string, Buffer>,
+  runner: CommandRunner,
+): Buffer {
+  const cached = cache.get(entry.objectId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const contents = objectBytes(repository, entry.objectId, runner);
+  if (entry.size === undefined || contents.byteLength !== entry.size) {
+    throw new AppError(`Git object for '${entry.path}' has an invalid size.`, "GIT_OBJECT_INVALID");
+  }
+  cache.set(entry.objectId, contents);
+  return contents;
+}
+
 export function validateReferenceScope(
   repository: string,
   reference: string,
@@ -621,6 +701,7 @@ export function validateReferenceScope(
   }
   validatePortablePathSet(entries.map((entry) => entry.path));
   const byProfile = new Map<string, GitTreeEntry[]>();
+  const binaryCache = new Map<string, Buffer>();
   const textCache = new Map<string, string>();
   let totalBytes = 0;
 
@@ -669,6 +750,8 @@ export function validateReferenceScope(
       const contents = treeObjectText(repository, entry, textCache, runner);
       if (entry.path === ".gitattributes") {
         validateGitAttributes(contents, entry.path);
+      } else if (entry.path === AGE_RECIPIENT_PATH) {
+        parseAgeRecipient(contents);
       } else {
         validatePortableText(contents, entry.path, "REPOSITORY_CONTROL_UNSAFE");
       }
@@ -682,6 +765,12 @@ export function validateReferenceScope(
       );
     }
     const relativePath = profileRelativePath(profile, entry.path);
+    if (isNativeSecretsPath(profile, relativePath)) {
+      throw new AppError(
+        `Refusing tracked plaintext secrets path '${entry.path}'; only the encrypted stored path may enter Git.`,
+        "INLINE_SECRET",
+      );
+    }
     if (relativePath === PROFILE_CONTROL_PATH) {
       if (entry.kind !== "file" || entry.mode !== "100644") {
         throw new AppError(
@@ -690,13 +779,25 @@ export function validateReferenceScope(
         );
       }
       treeObjectText(repository, entry, textCache, runner);
+    } else if (isStoredSecretsPath(profile, relativePath)) {
+      if (entry.kind !== "file" || entry.mode !== "100644") {
+        throw new AppError(
+          `Encrypted secrets file '${entry.path}' must be a non-executable regular file.`,
+          "SECRETS_CIPHERTEXT_INVALID",
+        );
+      }
+      validateAgeCiphertext(treeObjectBytes(repository, entry, binaryCache, runner), entry.path);
     } else if (!isPortablePath(profile, relativePath)) {
       throw new AppError(
         `Git tree path '${entry.path}' is outside the '${profile.name}' allowlist.`,
         "TRACKED_PATH_UNMANAGED",
       );
     }
-    if (entry.kind === "file" && isPortableFile(profile, relativePath)) {
+    if (
+      entry.kind === "file" &&
+      !isStoredSecretsPath(profile, relativePath) &&
+      isPortableFile(profile, relativePath)
+    ) {
       const contents = treeObjectText(repository, entry, textCache, runner);
       if (shouldScanForSecrets(profile, relativePath) && inlineSecretDetected(contents)) {
         throw new AppError(
@@ -832,6 +933,21 @@ export function validateRepositoryScope(
       );
     }
     const relativePath = profileRelativePath(profile, entry.path);
+    if (isNativeSecretsPath(profile, relativePath)) {
+      throw new AppError(
+        `Refusing tracked plaintext secrets path '${entry.path}'; only the encrypted stored path may enter Git.`,
+        "INLINE_SECRET",
+      );
+    }
+    if (
+      isStoredSecretsPath(profile, relativePath) &&
+      (entry.kind !== "file" || entry.mode !== "100644")
+    ) {
+      throw new AppError(
+        `Encrypted secrets file '${entry.path}' must be a non-executable regular file.`,
+        "SECRETS_CIPHERTEXT_INVALID",
+      );
+    }
     if (relativePath !== PROFILE_CONTROL_PATH && !isPortablePath(profile, relativePath)) {
       throw new AppError(
         `Tracked path '${entry.path}' is outside the '${profile.name}' allowlist.`,
@@ -907,7 +1023,9 @@ function scanLiveProfile(
   readonly totalBytes: number;
 } {
   const scan = walkPortableTree(liveDirectoryFor(profile, paths, environment), profile);
-  const entries = filteredEntries(paths.repositoryDirectory, profile, scan.entries, runner);
+  const entries = filteredEntries(paths.repositoryDirectory, profile, scan.entries, runner).filter(
+    (entry) => !isStoredSecretsPath(profile, entry.relativePath),
+  );
   for (const entry of entries) {
     validateEntrySecrets(profile, scan.root, entry);
   }
@@ -955,12 +1073,30 @@ export function profileState(
       changes.push({ kind: "modified", relativePath, risk: liveEntry.risk });
     }
   }
+  const secretState = inspectSecretPair(paths, profile, environment, runner);
+  if (secretState.change !== undefined && profile.secretsFile !== undefined) {
+    changes.push({
+      kind: secretState.change,
+      relativePath: profile.secretsFile.stored,
+      risk: profile.secretsFile.risk,
+    });
+  }
+  const protectedSecrets =
+    secretState.protectedReason === undefined || profile.secretsFile === undefined
+      ? []
+      : [
+          {
+            reason: secretState.protectedReason,
+            relativePath: profile.secretsFile.stored,
+          },
+        ];
   return {
     bindings: live.bindings,
     changes,
     liveDirectory: liveDirectoryFor(profile, paths, environment),
     managedEntries: liveEntries.length,
     name: profile.name,
+    protectedSecrets,
     totalBytes: live.totalBytes,
   };
 }
@@ -1024,6 +1160,7 @@ export function captureProfile(
   for (const entry of live.entries) {
     copyManagedEntry(live.root, stored.root, entry);
   }
+  captureSecretPair(paths, profile, environment, runner);
   return state.changes;
 }
 
@@ -1129,7 +1266,7 @@ function planProfileApply(
       continue;
     }
     const relativePath = profileRelativePath(profile, deletedPath);
-    if (!isPortablePath(profile, relativePath)) {
+    if (!isPortablePath(profile, relativePath) || isStoredSecretsPath(profile, relativePath)) {
       continue;
     }
     if (protectBindings(relativePath)) {
@@ -1153,6 +1290,9 @@ function planProfileApply(
   );
   const liveMap = entryMap(liveEntries);
   for (const desired of desiredEntries) {
+    if (isStoredSecretsPath(profile, desired.relativePath)) {
+      continue;
+    }
     if (protectBindings(desired.relativePath)) {
       continue;
     }
@@ -1233,6 +1373,20 @@ function backupReferences(actions: readonly PlannedAction[]): readonly BackupRef
   return references;
 }
 
+function secretBackupReferences(actions: readonly SecretApplyAction[]): readonly BackupReference[] {
+  return actions.map((action) => {
+    const reference: BackupReference = {
+      liveRoot: action.liveRoot,
+      profile: action.profile.name,
+      repositoryDirectory: action.profile.repositoryDirectory,
+      relativePath: action.relativePath,
+    };
+    return action.currentEntry === undefined
+      ? reference
+      : { ...reference, currentEntry: action.currentEntry };
+  });
+}
+
 function executeActions(actions: readonly PlannedAction[]): void {
   const deletions = actions
     .filter((action) => action.operation === "delete")
@@ -1268,18 +1422,29 @@ export function applyProfiles(
 ): ApplyResult {
   validateRepositoryScope(paths.repositoryDirectory, runner);
   const actions: PlannedAction[] = [];
+  const secretActions: SecretApplyAction[] = [];
   const protectedByProfile = new Map<string, number>();
+  const protectedSecretsByProfile = new Map<string, number>();
   for (const profile of profiles) {
     const plan = planProfileApply(paths, profile, deletedRepositoryPaths, environment, runner);
     actions.push(...plan.actions);
     protectedByProfile.set(profile.name, plan.protectedBindings);
+    const secretPlan = planSecretApply(paths, profile, deletedRepositoryPaths, environment, runner);
+    if (secretPlan.action !== undefined) {
+      secretActions.push(secretPlan.action);
+    }
+    protectedSecretsByProfile.set(profile.name, secretPlan.protectedReason === undefined ? 0 : 1);
   }
-  const backup = createBackup(paths, backupReferences(actions));
+  const backup = createBackup(paths, [
+    ...backupReferences(actions),
+    ...secretBackupReferences(secretActions),
+  ]);
   if (backup !== undefined) {
     beginApplyJournal(paths, backup);
   }
   try {
     executeActions(actions);
+    executeSecretActions(secretActions);
     if (backup !== undefined) {
       completeApplyJournal(paths);
     }
@@ -1298,14 +1463,23 @@ export function applyProfiles(
     throw new AppError(`Apply failed and was rolled back: ${errorMessage(error)}`, "APPLY_FAILED");
   }
   const results = profiles.map((profile) => ({
-    copied: actions.filter(
-      (action) => action.profile.name === profile.name && action.operation === "copy",
-    ).length,
-    deleted: actions.filter(
-      (action) => action.profile.name === profile.name && action.operation === "delete",
-    ).length,
+    copied:
+      actions.filter(
+        (action) => action.profile.name === profile.name && action.operation === "copy",
+      ).length +
+      secretActions.filter(
+        (action) => action.profile.name === profile.name && action.operation === "write",
+      ).length,
+    deleted:
+      actions.filter(
+        (action) => action.profile.name === profile.name && action.operation === "delete",
+      ).length +
+      secretActions.filter(
+        (action) => action.profile.name === profile.name && action.operation === "delete",
+      ).length,
     name: profile.name,
     protectedBindings: protectedByProfile.get(profile.name) ?? 0,
+    protectedSecrets: protectedSecretsByProfile.get(profile.name) ?? 0,
   }));
   return backup === undefined ? { profiles: results } : { backup, profiles: results };
 }

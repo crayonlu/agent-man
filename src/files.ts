@@ -26,6 +26,7 @@ import {
   NativeProfile,
   isPortableFile,
   isPortablePath,
+  isStoredSecretsPath,
   riskForPath,
 } from "./profiles.js";
 
@@ -285,7 +286,11 @@ function resolveInternalTarget(
     }
     const targetFromRoot = relative(root, target);
     const portableTarget = normalizedFileSystemRelativePath(targetFromRoot);
-    if (portableTarget === "" || !isPortablePath(profile, portableTarget)) {
+    if (
+      portableTarget === "" ||
+      !isPortablePath(profile, portableTarget) ||
+      isStoredSecretsPath(profile, portableTarget)
+    ) {
       return undefined;
     }
     const segments = targetFromRoot === "" ? [] : targetFromRoot.split(sep);
@@ -355,7 +360,11 @@ export function portableSymlinkTargetReason(
     return "external";
   }
   const targetRelativePath = normalizedFileSystemRelativePath(relative(root, lexicalTarget));
-  if (targetRelativePath === "" || !isPortablePath(profile, targetRelativePath)) {
+  if (
+    targetRelativePath === "" ||
+    !isPortablePath(profile, targetRelativePath) ||
+    isStoredSecretsPath(profile, targetRelativePath)
+  ) {
     return "unportable";
   }
   return undefined;

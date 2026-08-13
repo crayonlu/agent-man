@@ -14,16 +14,23 @@ test("the bundled repository template is deny-by-default and line-ending explici
   assert.match(ignores, /^\/\*$/mu);
   assert.match(ignores, /^!\/\.gitignore$/mu);
   assert.match(ignores, /^!\/\.gitattributes$/mu);
+  assert.match(ignores, /^!\/\.age-recipient$/mu);
   for (const profile of NATIVE_PROFILES) {
     assert.equal(ignores.includes(`!/${profile.repositoryDirectory}/`), true);
   }
   assert.match(attributes, /^\* text=auto eol=lf$/mu);
   assert.match(attributes, /^\*\.sh text eol=lf$/mu);
   assert.match(attributes, /^\*\.cmd text eol=crlf$/mu);
+  assert.match(attributes, /^\*\.age -text$/mu);
 });
 
 test("each generated profile ignore file documents the exact built-in allowlist", () => {
   for (const profile of NATIVE_PROFILES) {
+    assert.deepEqual(profile.secretsFile, {
+      native: "secrets.env",
+      risk: "configuration",
+      stored: "secrets.env.age",
+    });
     const contents = profileIgnoreContents(profile);
     assert.match(contents, /^\*$/mu);
     assert.match(contents, /^!\.gitignore$/mu);
@@ -37,5 +44,7 @@ test("each generated profile ignore file documents the exact built-in allowlist"
       assert.equal(contents.includes(`!${directory.relativePath}/\n`), true);
       assert.equal(contents.includes(`!${directory.relativePath}/**\n`), true);
     }
+    assert.equal(contents.includes(`!${profile.secretsFile.stored}\n`), true);
+    assert.equal(contents.includes(`!${profile.secretsFile.native}\n`), false);
   }
 });

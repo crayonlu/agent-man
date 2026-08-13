@@ -10,13 +10,15 @@ export interface CommandOptions {
   readonly acceptedExitCodes?: readonly number[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly input?: string;
+  readonly input?: Buffer | string;
 }
 
 export interface CommandResult {
   readonly status: number;
   readonly stderr: string;
   readonly stdout: string;
+  /** Exact stdout bytes for commands whose output is not UTF-8 text. */
+  readonly stdoutBytes?: Buffer;
 }
 
 export type CommandRunner = (
@@ -35,10 +37,16 @@ function outputText(value: string | Buffer | null): string {
   return value.toString("utf8");
 }
 
+function outputBytes(value: string | Buffer | null): Buffer {
+  if (value === null) {
+    return Buffer.alloc(0);
+  }
+  return typeof value === "string" ? Buffer.from(value, "utf8") : value;
+}
+
 export const runCommand: CommandRunner = (command, arguments_, options = {}) => {
   const result = spawnSync(command, [...arguments_], {
     cwd: options.cwd,
-    encoding: "utf8",
     env: options.env ?? process.env,
     input: options.input,
     maxBuffer: MAX_COMMAND_OUTPUT_BYTES,
@@ -62,7 +70,7 @@ export const runCommand: CommandRunner = (command, arguments_, options = {}) => 
     throw new AppError(`${command} failed: ${detail}`, "COMMAND_FAILED");
   }
 
-  return { status, stderr, stdout };
+  return { status, stderr, stdout, stdoutBytes: outputBytes(result.stdout) };
 };
 
 export function executableAvailable(

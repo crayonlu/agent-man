@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const npmCli = process.env.npm_execpath;
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 if (npmCli === undefined) {
   console.error("Run this check through 'npm run install:check'.");
   process.exitCode = 1;
@@ -68,7 +71,7 @@ if (npmCli === undefined) {
       env: environment,
       shell: process.platform === "win32",
     });
-    if (version.status !== 0 || version.stdout.trim() !== "agent-man 0.2.0") {
+    if (version.status !== 0 || version.stdout.trim() !== `agent-man ${packageVersion}`) {
       throw new Error(
         version.error?.message ||
           version.stderr?.trim() ||
